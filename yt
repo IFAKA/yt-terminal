@@ -5,6 +5,28 @@ set -o pipefail
 
 VERSION="1.0.0"
 
+# Spinner for loading states
+show_spinner() {
+    local pid=$1
+    local message=$2
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local temp
+    
+    tput civis 2>/dev/null  # Hide cursor
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        temp=${spinstr#?}
+        printf "\r%s %s" "${spinstr:0:1}" "$message"
+        spinstr=$temp${spinstr%"$temp"}
+        sleep 0.1
+    done
+    
+    tput cnorm 2>/dev/null  # Show cursor
+    printf "\r"
+}
+
+
+
 # Default configuration
 DEFAULT_NUM_RESULTS=10
 DEFAULT_MAX_QUALITY=1080
@@ -423,8 +445,6 @@ search_playlists_youtube() {
         return 0
     fi
     
-    echo "⏳ Fetching playlists..."
-    
     # URL-encode the search term
     local encoded_term
     encoded_term=$(echo "$search_term" | sed 's/ /+/g')
@@ -438,14 +458,24 @@ search_playlists_youtube() {
     local error_output
     error_output=$(mktemp)
     
-    if ! timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
-        --flat-playlist \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        --playlist-end "$NUM_RESULTS" \
-        2>"$error_output" > "$jsonfile"; then
+    # Run fetch with spinner
+    (
+        timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
+            --flat-playlist \
+            --dump-json \
+            --skip-download \
+            --no-warnings \
+            --quiet \
+            --playlist-end "$NUM_RESULTS" \
+            2>"$error_output" > "$jsonfile"
+    ) &
+    local fetch_pid=$!
+    
+    show_spinner "$fetch_pid" "Fetching playlists from YouTube..."
+    wait "$fetch_pid"
+    local fetch_result=$?
+    
+    if [ "$fetch_result" -ne 0 ]; then
         rm -f "$jsonfile"
         
         echo "❌ Search failed or timed out"
@@ -551,8 +581,6 @@ search_youtube() {
         return 0
     fi
     
-    echo "⏳ Fetching videos..."
-    
     # Create temp file for raw JSON
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
@@ -561,12 +589,22 @@ search_youtube() {
     local error_output
     error_output=$(mktemp)
     
-    if ! timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        > "$jsonfile" 2>"$error_output"; then
+    # Run fetch with spinner
+    (
+        timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
+            --dump-json \
+            --skip-download \
+            --no-warnings \
+            --quiet \
+            > "$jsonfile" 2>"$error_output"
+    ) &
+    local fetch_pid=$!
+    
+    show_spinner "$fetch_pid" "Fetching videos from YouTube..."
+    wait "$fetch_pid"
+    local fetch_result=$?
+    
+    if [ "$fetch_result" -ne 0 ]; then
         rm -f "$jsonfile"
         
         echo "❌ Search failed or timed out"
@@ -661,13 +699,15 @@ download_thumbnails() {
     else
         echo "✅ Successfully fetched $items_count videos!"
     fi
-    echo "📥 Downloading thumbnails..."
-    echo ""
     
-    # Wait a bit for thumbnails to download
-    sleep 2
+    # Wait for thumbnails with spinner
+    (sleep 2) &
+    local sleep_pid=$!
+    show_spinner "$sleep_pid" "Downloading thumbnails..."
+    wait "$sleep_pid"
+    
     echo "✅ Ready!"
-    sleep 1
+    sleep 0.5
     
     return 0
 }
@@ -1048,6 +1088,7 @@ fetch_home_feed() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # shellcheck disable=SC2086
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/recommended" \
         --flat-playlist \
         --dump-json \
@@ -1109,6 +1150,7 @@ fetch_subscriptions_feed() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # shellcheck disable=SC2086
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/subscriptions" \
         --flat-playlist \
         --dump-json \
@@ -1170,6 +1212,7 @@ fetch_user_playlists() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # shellcheck disable=SC2086
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/library" \
         --flat-playlist \
         --dump-json \
@@ -1233,6 +1276,7 @@ fetch_watch_later() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # shellcheck disable=SC2086
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=WL" \
         --flat-playlist \
         --dump-json \
@@ -1294,6 +1338,7 @@ fetch_liked_videos() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # shellcheck disable=SC2086
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=LL" \
         --flat-playlist \
         --dump-json \
@@ -1368,6 +1413,7 @@ fetch_next_from_feed() {
     local start=$((offset + 1))
     local end=$((offset + count))
     
+    # shellcheck disable=SC2086
     timeout "$TIMEOUT" yt-dlp $auth_args "$feed_url" \
         --flat-playlist \
         --dump-json \
