@@ -500,15 +500,16 @@ search_youtube() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
-    # Fetch videos to temp file
+    # Fetch videos to temp file  
     if ! timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
         --dump-json \
         --skip-download \
         --no-warnings \
         --quiet \
-        2>/dev/null > "$jsonfile"; then
+        > "$jsonfile" 2>/dev/null; then
         rm -f "$jsonfile"
         echo "❌ Search failed or timed out"
+        echo "Tip: Try updating yt-dlp with: pip install --upgrade yt-dlp"
         return 1
     fi
     
@@ -1247,6 +1248,51 @@ fetch_liked_videos() {
     return 0
 }
 
+# Fetch next videos from personal feed for autoplay
+fetch_next_from_feed() {
+    local feed_type="$1"  # home, subs, watch-later, liked
+    local offset="${2:-0}"  # Skip first N videos
+    local count="${3:-5}"  # How many to fetch
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    local feed_url
+    case "$feed_type" in
+        home)
+            feed_url="https://www.youtube.com/feed/recommended"
+            ;;
+        subs)
+            feed_url="https://www.youtube.com/feed/subscriptions"
+            ;;
+        watch-later)
+            feed_url="https://www.youtube.com/playlist?list=WL"
+            ;;
+        liked)
+            feed_url="https://www.youtube.com/playlist?list=LL"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    
+    # Fetch videos with offset
+    local start=$((offset + 1))
+    local end=$((offset + count))
+    
+    timeout "$TIMEOUT" yt-dlp $auth_args "$feed_url" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-start "$start" \
+        --playlist-end "$end" \
+        2>/dev/null | while IFS= read -r line; do
+            echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"'
+        done
+}
+
 # Show account menu and handle selection
 show_account_menu() {
     clear
@@ -1606,10 +1652,11 @@ main() {
                 exit 1
             fi
             
-            # Autoplay for videos (same as regular video flow)
+            # Autoplay for videos - use personalized feed for personal content
             if [ "$autoplay" = "true" ]; then
                 local current_video_id
                 current_video_id=$(echo "$selected" | awk '{print $NF}')
+                local video_index=1  # Track position in feed
                 
                 while true; do
                     echo ""
@@ -1617,19 +1664,23 @@ main() {
                     echo "✅ Video finished"
                     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     
-                    local related_videos
-                    related_videos=$(get_related_videos "$current_video_id" 5)
+                    local next_video
                     
-                    if [ -z "$related_videos" ]; then
-                        echo "❌ No more related videos found"
-                        break
+                    # For personal feeds, fetch next from the same feed
+                    if [ "$personal_mode" = "home" ] || [ "$personal_mode" = "subs" ] || \
+                       [ "$personal_mode" = "watch-later" ] || [ "$personal_mode" = "liked" ]; then
+                        echo "⏳ Loading next from your $search_term..."
+                        next_video=$(fetch_next_from_feed "$personal_mode" "$video_index" 1)
+                        video_index=$((video_index + 1))
+                    else
+                        # For regular searches, use related videos
+                        local related_videos
+                        related_videos=$(get_related_videos "$current_video_id" 5)
+                        next_video=$(echo "$related_videos" | head -n 1)
                     fi
                     
-                    local next_video
-                    next_video=$(echo "$related_videos" | head -n 1)
-                    
                     if [ -z "$next_video" ]; then
-                        echo "❌ No more related videos found"
+                        echo "❌ No more videos found"
                         break
                     fi
                     
