@@ -12,17 +12,24 @@ show_spinner() {
     local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local temp
     
-    tput civis 2>/dev/null  # Hide cursor
-    
-    while kill -0 "$pid" 2>/dev/null; do
-        temp=${spinstr#?}
-        printf "\r%s %s" "${spinstr:0:1}" "$message"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep 0.1
-    done
-    
-    tput cnorm 2>/dev/null  # Show cursor
-    printf "\r"
+    # Check if we have a terminal (for CI/non-interactive environments)
+    if [ -t 1 ]; then
+        tput civis 2>/dev/null  # Hide cursor
+        
+        while kill -0 "$pid" 2>/dev/null; do
+            temp=${spinstr#?}
+            printf "\r%s %s" "${spinstr:0:1}" "$message"
+            spinstr=$temp${spinstr%"$temp"}
+            sleep 0.1
+        done
+        
+        tput cnorm 2>/dev/null  # Show cursor
+        printf "\r"
+    else
+        # Non-interactive mode: just show the message once
+        echo "$message"
+        wait "$pid"
+    fi
 }
 
 
