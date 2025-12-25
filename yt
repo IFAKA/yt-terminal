@@ -645,6 +645,8 @@ search_youtube() {
             # Check how many videos we've found so far
             if [ -f "$jsonfile" ]; then
                 count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
+                count=${count//[^0-9]/}  # Remove any non-numeric characters
+                [ -z "$count" ] && count=0  # Default to 0 if empty
             fi
             temp=${spinstr#?}
             printf "\r%s Fetching videos... Found: %d/%d" "${spinstr:0:1}" "$count" "$NUM_RESULTS"
