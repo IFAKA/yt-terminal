@@ -243,6 +243,26 @@ check_dependencies() {
         return 1
     fi
     
+    # Test if yt-dlp is working
+    if ! timeout 10 yt-dlp --version &>/dev/null; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ yt-dlp is not working properly"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Try updating yt-dlp:"
+        if command -v brew &> /dev/null; then
+            echo "  brew upgrade yt-dlp"
+        elif command -v pip3 &> /dev/null; then
+            echo "  pip3 install --upgrade yt-dlp"
+        elif command -v pip &> /dev/null; then
+            echo "  pip install --upgrade yt-dlp"
+        else
+            echo "  Visit: https://github.com/yt-dlp/yt-dlp#installation"
+        fi
+        echo ""
+        return 1
+    fi
+    
     if [ ${#optional_deps[@]} -ne 0 ]; then
         echo "ℹ️  Optional: Install 'chafa' for thumbnail previews"
         echo "   brew install chafa"
@@ -415,6 +435,9 @@ search_playlists_youtube() {
     
     # Use YouTube search URL with playlist filter (sp=EgIQAw%253D%253D)
     # This filter specifically searches for playlists
+    local error_output
+    error_output=$(mktemp)
+    
     if ! timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
         --flat-playlist \
         --dump-json \
@@ -422,11 +445,40 @@ search_playlists_youtube() {
         --no-warnings \
         --quiet \
         --playlist-end "$NUM_RESULTS" \
-        2>/dev/null > "$jsonfile"; then
+        2>"$error_output" > "$jsonfile"; then
         rm -f "$jsonfile"
+        
         echo "❌ Search failed or timed out"
+        echo ""
+        
+        # Check if there's useful error info
+        if [ -s "$error_output" ]; then
+            echo "Error details:"
+            head -3 "$error_output" | sed 's/^/  /'
+            echo ""
+        fi
+        
+        echo "Troubleshooting steps:"
+        echo "  1. Update yt-dlp:"
+        if command -v brew &> /dev/null; then
+            echo "     brew upgrade yt-dlp"
+        elif command -v pip3 &> /dev/null; then
+            echo "     pip3 install --upgrade yt-dlp"
+        elif command -v pip &> /dev/null; then
+            echo "     pip install --upgrade yt-dlp"
+        else
+            echo "     Visit: https://github.com/yt-dlp/yt-dlp#installation"
+        fi
+        
+        echo ""
+        echo "  2. Check your internet connection"
+        echo "  3. Try a different search term"
+        
+        rm -f "$error_output"
         return 1
     fi
+    
+    rm -f "$error_output"
     
     # Parse and display results
     local count=0
@@ -505,18 +557,49 @@ search_youtube() {
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
-    # Fetch videos to temp file  
+    # Fetch videos to temp file
+    local error_output
+    error_output=$(mktemp)
+    
     if ! timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
         --dump-json \
         --skip-download \
         --no-warnings \
         --quiet \
-        > "$jsonfile" 2>/dev/null; then
+        > "$jsonfile" 2>"$error_output"; then
         rm -f "$jsonfile"
+        
         echo "❌ Search failed or timed out"
-        echo "Tip: Try updating yt-dlp with: pip install --upgrade yt-dlp"
+        echo ""
+        
+        # Check if there's useful error info
+        if [ -s "$error_output" ]; then
+            echo "Error details:"
+            head -3 "$error_output" | sed 's/^/  /'
+            echo ""
+        fi
+        
+        echo "Troubleshooting steps:"
+        echo "  1. Update yt-dlp:"
+        if command -v brew &> /dev/null; then
+            echo "     brew upgrade yt-dlp"
+        elif command -v pip3 &> /dev/null; then
+            echo "     pip3 install --upgrade yt-dlp"
+        elif command -v pip &> /dev/null; then
+            echo "     pip install --upgrade yt-dlp"
+        else
+            echo "     Visit: https://github.com/yt-dlp/yt-dlp#installation"
+        fi
+        
+        echo ""
+        echo "  2. Check your internet connection"
+        echo "  3. Try a different search term"
+        
+        rm -f "$error_output"
         return 1
     fi
+    
+    rm -f "$error_output"
     
     # Parse and display results
     local count=0
