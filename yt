@@ -275,7 +275,8 @@ download_thumbnails() {
         return 1
     fi
     
-    videos_count=$(echo "$results" | wc -l | xargs)
+    # Count actual non-empty lines
+    videos_count=$(echo "$results" | grep -c '^.')
     echo "✅ Successfully fetched $videos_count videos!"
     echo "📥 Downloading thumbnails..."
     echo ""
@@ -292,7 +293,8 @@ download_thumbnails() {
 select_video() {
     local search_term="$1"
     local videos_count
-    videos_count=$(echo "$results" | wc -l | xargs)
+    # Count actual non-empty lines
+    videos_count=$(echo "$results" | grep -c '^.')
     
     # Clear screen and show results
     clear
@@ -394,12 +396,12 @@ main() {
     # Load configuration
     load_config
     
-    # Check dependencies
+    local search_term="$*"
+    
+    # Check dependencies (always run before usage to give helpful error messages)
     if ! check_dependencies; then
         exit 1
     fi
-    
-    local search_term="$*"
     
     if [ -z "$search_term" ]; then
         show_usage
