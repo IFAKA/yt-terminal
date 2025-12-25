@@ -85,7 +85,7 @@ setup_authentication() {
     
     # Detect available browsers
     local available_browsers
-    available_browsers=($(detect_browsers))
+    mapfile -t available_browsers < <(detect_browsers)
     
     if [ ${#available_browsers[@]} -eq 0 ]; then
         echo "❌ No supported browsers detected."
@@ -185,8 +185,10 @@ is_cache_valid() {
         return 1
     fi
     
-    local current_time=$(date +%s)
-    local file_time=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
+    local current_time
+    current_time=$(date +%s)
+    local file_time
+    file_time=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
     local age=$((current_time - file_time))
     
     if [ "$age" -lt "$CACHE_EXPIRY" ]; then
@@ -311,22 +313,25 @@ clear_cache() {
     local deleted=0
     
     if [ -d "$SEARCH_CACHE_DIR" ]; then
-        local count=$(find "$SEARCH_CACHE_DIR" -type f | wc -l | xargs)
-        rm -rf "$SEARCH_CACHE_DIR"/*
+        local count
+        count=$(find "$SEARCH_CACHE_DIR" -type f | wc -l | xargs)
+        rm -rf "${SEARCH_CACHE_DIR:?}"/*
         deleted=$((deleted + count))
         echo "✓ Cleared search cache ($count files)"
     fi
     
     if [ -d "$PLAYLIST_CACHE_DIR" ]; then
-        local count=$(find "$PLAYLIST_CACHE_DIR" -type f | wc -l | xargs)
-        rm -rf "$PLAYLIST_CACHE_DIR"/*
+        local count
+        count=$(find "$PLAYLIST_CACHE_DIR" -type f | wc -l | xargs)
+        rm -rf "${PLAYLIST_CACHE_DIR:?}"/*
         deleted=$((deleted + count))
         echo "✓ Cleared playlist cache ($count files)"
     fi
     
     if [ -d "$CACHE_DIR" ]; then
-        local count=$(find "$CACHE_DIR" -name "*.jpg" | wc -l | xargs)
-        rm -rf "$CACHE_DIR"/*.jpg
+        local count
+        count=$(find "$CACHE_DIR" -name "*.jpg" | wc -l | xargs)
+        rm -rf "${CACHE_DIR:?}"/*.jpg
         deleted=$((deleted + count))
         echo "✓ Cleared thumbnail cache ($count files)"
     fi
