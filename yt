@@ -42,6 +42,7 @@ DEFAULT_VOLUME=100
 DEFAULT_CACHE_DIR="$HOME/.cache/yt-thumbnails"
 DEFAULT_SEARCH_CACHE_DIR="$HOME/.cache/yt-search"
 DEFAULT_PLAYLIST_CACHE_DIR="$HOME/.cache/yt-playlists"
+DEFAULT_VIDEO_INFO_CACHE_DIR="$HOME/.cache/yt-video-info"
 DEFAULT_CACHE_EXPIRY=3600  # 1 hour in seconds
 CONFIG_DIR="$HOME/.config/yt"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -62,10 +63,11 @@ load_config() {
     CACHE_DIR=${CACHE_DIR:-$DEFAULT_CACHE_DIR}
     SEARCH_CACHE_DIR=${SEARCH_CACHE_DIR:-$DEFAULT_SEARCH_CACHE_DIR}
     PLAYLIST_CACHE_DIR=${PLAYLIST_CACHE_DIR:-$DEFAULT_PLAYLIST_CACHE_DIR}
+    VIDEO_INFO_CACHE_DIR=${VIDEO_INFO_CACHE_DIR:-$DEFAULT_VIDEO_INFO_CACHE_DIR}
     CACHE_EXPIRY=${CACHE_EXPIRY:-$DEFAULT_CACHE_EXPIRY}
     
     # Create cache and config directories
-    mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" "$CONFIG_DIR" 2>/dev/null
+    mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" "$VIDEO_INFO_CACHE_DIR" "$CONFIG_DIR" 2>/dev/null
     
     # Load user config if it exists
     if [ -f "$CONFIG_FILE" ]; then
@@ -522,6 +524,14 @@ clear_cache() {
         rm -rf "${CACHE_DIR:?}"/*.jpg
         deleted=$((deleted + count))
         echo "✓ Cleared thumbnail cache ($count files)"
+    fi
+    
+    if [ -d "$VIDEO_INFO_CACHE_DIR" ]; then
+        local count
+        count=$(find "$VIDEO_INFO_CACHE_DIR" -type f | wc -l | xargs)
+        rm -rf "${VIDEO_INFO_CACHE_DIR:?}"/*
+        deleted=$((deleted + count))
+        echo "✓ Cleared video info cache ($count files)"
     fi
     
     echo ""
@@ -1112,13 +1122,29 @@ get_related_videos() {
 # Fetch video description and metadata
 get_video_info() {
     local video_id="$1"
+    local cache_file="$VIDEO_INFO_CACHE_DIR/$video_id.json"
     
-    timeout "$TIMEOUT" yt-dlp "https://youtube.com/watch?v=$video_id" \
+    # Check cache first
+    if is_cache_valid "$cache_file"; then
+        cat "$cache_file"
+        return 0
+    fi
+    
+    # Fetch from YouTube
+    local video_info
+    video_info=$(timeout "$TIMEOUT" yt-dlp "https://youtube.com/watch?v=$video_id" \
         --dump-json \
         --skip-download \
         --no-warnings \
         --quiet \
-        2>/dev/null
+        2>/dev/null)
+    
+    # Cache the result if successful
+    if [ -n "$video_info" ]; then
+        echo "$video_info" > "$cache_file"
+    fi
+    
+    echo "$video_info"
 }
 
 # Extract links from description with context
