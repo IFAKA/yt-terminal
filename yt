@@ -46,6 +46,7 @@ DEFAULT_VIDEO_INFO_CACHE_DIR="$HOME/.cache/yt-video-info"
 DEFAULT_CACHE_EXPIRY=3600  # 1 hour in seconds
 CONFIG_DIR="$HOME/.config/yt"
 CONFIG_FILE="$CONFIG_DIR/config"
+COOKIES_FILE="$CONFIG_DIR/cookies.txt"
 FIRST_RUN_FILE="$CONFIG_DIR/.first_run_complete"
 
 # Accessibility settings
@@ -368,13 +369,36 @@ setup_authentication() {
     fi
     rm -f "$test_output"
     
-    # Save to config
-    {
-        echo ""
-        echo "# Authentication (auto-configured)"
-        echo "AUTH_METHOD=\"browser\""
-        echo "BROWSER=\"$browser_choice\""
-    } >> "$CONFIG_FILE"
+    # Export cookies to file to avoid repeated password prompts
+    echo ""
+    echo "⏳ Exporting cookies to file (you may be asked for your password once)..."
+    
+    # Remove old cookies file
+    rm -f "$COOKIES_FILE"
+    
+    # Export cookies from browser
+    if timeout 30 yt-dlp --cookies-from-browser "$browser_choice" --cookies "$COOKIES_FILE" --simulate "ytsearch1:test" &>/dev/null; then
+        echo "✓ Cookies exported successfully"
+        
+        # Save to config
+        {
+            echo ""
+            echo "# Authentication (auto-configured)"
+            echo "AUTH_METHOD=\"cookies\""
+            echo "BROWSER=\"$browser_choice\""
+        } >> "$CONFIG_FILE"
+    else
+        echo "⚠️  Cookie export failed - will use browser cookies directly"
+        echo "   (You may be asked for your password on each use)"
+        
+        # Save to config without cookie file
+        {
+            echo ""
+            echo "# Authentication (auto-configured)"
+            echo "AUTH_METHOD=\"browser\""
+            echo "BROWSER=\"$browser_choice\""
+        } >> "$CONFIG_FILE"
+    fi
     
     # Reload config
     load_config
@@ -401,8 +425,14 @@ get_auth_args() {
         fi
     fi
     
-    # Return the auth argument
-    echo "--cookies-from-browser $BROWSER"
+    # Return the auth argument based on method
+    if [ "$AUTH_METHOD" = "cookies" ] && [ -f "$COOKIES_FILE" ]; then
+        # Use exported cookie file (no password prompt)
+        echo "--cookies $COOKIES_FILE"
+    else
+        # Use browser cookies directly (may prompt for password)
+        echo "--cookies-from-browser $BROWSER"
+    fi
     return 0
 }
 
@@ -1723,12 +1753,7 @@ fetch_personal_feed() {
     return 0
 }
 
-# Wrapper functions (kept for compatibility with tests)
-fetch_home_feed() { fetch_personal_feed "home" "$1"; }
-fetch_subscriptions_feed() { fetch_personal_feed "subs" "$1"; }
-fetch_user_playlists() { fetch_personal_feed "playlists" "$1"; }
-fetch_watch_later() { fetch_personal_feed "watch-later" "$1"; }
-fetch_liked_videos() { fetch_personal_feed "liked" "$1"; }
+
 
 # Fetch next videos from personal feed for autoplay
 fetch_next_from_feed() {
@@ -2297,10 +2322,11 @@ main() {
                 exit 0
                 ;;
             --setup-auth|--reconfigure)
-                # Remove existing browser config and re-run setup
+                # Remove existing browser config and cookies, then re-run setup
                 if [ -f "$CONFIG_FILE" ]; then
-                    sed -i.bak '/^BROWSER=/d' "$CONFIG_FILE"
+                    sed -i.bak '/^BROWSER=/d;/^AUTH_METHOD=/d' "$CONFIG_FILE"
                 fi
+                rm -f "$COOKIES_FILE"
                 setup_authentication
                 exit $?
                 ;;
