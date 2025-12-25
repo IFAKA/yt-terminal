@@ -1669,6 +1669,12 @@ main() {
     # Trim leading/trailing whitespace
     search_term=$(echo "$search_term" | xargs)
     
+    # Show usage if no search term (before checking dependencies)
+    if [ -z "$search_term" ] && [ -z "$personal_mode" ]; then
+        show_usage
+        exit 1
+    fi
+    
     # Check dependencies (always run before usage to give helpful error messages)
     if ! check_dependencies; then
         exit 1
@@ -1849,11 +1855,6 @@ main() {
         fi
         
         exit 0
-    fi
-    
-    if [ -z "$search_term" ]; then
-        show_usage
-        exit 1
     fi
     
     # Check if input is a URL
