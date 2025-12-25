@@ -417,7 +417,8 @@ play_url() {
         --ytdl-format="$format" \
         --volume="$VOLUME" \
         --audio-device=auto \
-        --window-maximized=yes; then
+        --autofit=100% \
+        --window-maximized; then
         echo "❌ Error playing video"
         return 1
     fi
@@ -428,6 +429,7 @@ play_url() {
 # Search YouTube for playlists
 search_playlists_youtube() {
     local search_term="$1"
+    local auto_first="$2"
     
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📚 Searching YouTube playlists for: $search_term"
@@ -436,6 +438,12 @@ search_playlists_youtube() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     # Check cache first
     local cache_key
@@ -450,7 +458,8 @@ search_playlists_youtube() {
         local count=0
         while IFS=$'\t' read -r title _ id _; do
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$title" | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$title" | cut -c1-60)..."
+            [ "$auto_first" = "true" ] && break  # Only show first result if auto_first
         done < "$tmpfile"
         echo ""
         return 0
@@ -478,7 +487,7 @@ search_playlists_youtube() {
             --skip-download \
             --no-warnings \
             --quiet \
-            --playlist-end "$NUM_RESULTS" \
+            --playlist-end "$num_to_fetch" \
             2>"$error_output" > "$jsonfile"
     ) &
     local fetch_pid=$!
@@ -495,7 +504,7 @@ search_playlists_youtube() {
                 count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
             fi
             temp=${spinstr#?}
-            printf "\r%s Fetching playlists... Found: %d/%d" "${spinstr:0:1}" "$count" "$NUM_RESULTS"
+            printf "\r%s Fetching playlists... Found: %d/%d" "${spinstr:0:1}" "$count" "$num_to_fetch"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.2
         done
@@ -546,7 +555,7 @@ search_playlists_youtube() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         # Extract playlist info
         local playlist_title playlist_id thumbnail
         playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
@@ -558,7 +567,7 @@ search_playlists_youtube() {
             echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
             
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$playlist_title" | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -581,10 +590,11 @@ search_playlists_youtube() {
 search_youtube() {
     local search_term="$1"
     local search_playlists="$2"
+    local auto_first="$3"
     
     # Use different search for playlists
     if [ "$search_playlists" = "true" ]; then
-        search_playlists_youtube "$search_term"
+        search_playlists_youtube "$search_term" "$auto_first"
         return $?
     fi
     
@@ -595,6 +605,12 @@ search_youtube() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     # Check cache first
     local cache_key
@@ -609,7 +625,8 @@ search_youtube() {
         local count=0
         while IFS=$'\t' read -r title _ _ _; do
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$title" | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$title" | cut -c1-60)..."
+            [ "$auto_first" = "true" ] && break  # Only show first result if auto_first
         done < "$tmpfile"
         echo ""
         return 0
@@ -626,7 +643,7 @@ search_youtube() {
     # Run fetch with real-time progress
     echo "Searching YouTube..."
     (
-        timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
+        timeout "$TIMEOUT" yt-dlp "ytsearch${num_to_fetch}:$search_term" \
             --dump-json \
             --skip-download \
             --no-warnings \
@@ -649,7 +666,7 @@ search_youtube() {
                 [ -z "$count" ] && count=0  # Default to 0 if empty
             fi
             temp=${spinstr#?}
-            printf "\r%s Fetching videos... Found: %d/%d" "${spinstr:0:1}" "$count" "$NUM_RESULTS"
+            printf "\r%s Fetching videos... Found: %d/%d" "${spinstr:0:1}" "$count" "$num_to_fetch"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.2
         done
@@ -700,13 +717,13 @@ search_youtube() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         # Parse video data
         video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
         echo "$video_data" >> "$tmpfile"
         
         count=$((count + 1))
-        echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
     done < "$jsonfile"
     
     rm -f "$jsonfile"
@@ -920,7 +937,8 @@ play_playlist() {
         --ytdl-format="$format" \
         --volume="$VOLUME" \
         --audio-device=auto \
-        --window-maximized=yes; then
+        --autofit=100% \
+        --window-maximized; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "❌ Playback failed"
@@ -1131,6 +1149,8 @@ get_related_playlists() {
 
 # Fetch home/recommendations feed
 fetch_home_feed() {
+    local auto_first="$1"
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "🏠 Fetching personalized recommendations..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1141,6 +1161,12 @@ fetch_home_feed() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     echo "⏳ Loading your recommendations..."
     
@@ -1155,7 +1181,7 @@ fetch_home_feed() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$NUM_RESULTS" \
+        --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch recommendations"
@@ -1166,14 +1192,14 @@ fetch_home_feed() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         local video_data
         video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
         
         if [ -n "$video_data" ]; then
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -1193,6 +1219,8 @@ fetch_home_feed() {
 
 # Fetch subscriptions feed
 fetch_subscriptions_feed() {
+    local auto_first="$1"
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📺 Fetching subscriptions feed..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1203,6 +1231,12 @@ fetch_subscriptions_feed() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     echo "⏳ Loading latest videos from your subscriptions..."
     
@@ -1217,7 +1251,7 @@ fetch_subscriptions_feed() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$NUM_RESULTS" \
+        --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch subscriptions"
@@ -1228,14 +1262,14 @@ fetch_subscriptions_feed() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         local video_data
         video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
         
         if [ -n "$video_data" ]; then
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -1255,6 +1289,8 @@ fetch_subscriptions_feed() {
 
 # Fetch user playlists
 fetch_user_playlists() {
+    local auto_first="$1"
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📚 Fetching your playlists..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1265,6 +1301,12 @@ fetch_user_playlists() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     echo "⏳ Loading your playlists..."
     
@@ -1279,7 +1321,7 @@ fetch_user_playlists() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$NUM_RESULTS" \
+        --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch playlists"
@@ -1290,7 +1332,7 @@ fetch_user_playlists() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         local playlist_title playlist_id thumbnail
         playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
         playlist_id=$(echo "$line" | jq -r '.id // ""')
@@ -1299,7 +1341,7 @@ fetch_user_playlists() {
         if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
             echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$playlist_title" | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -1319,6 +1361,8 @@ fetch_user_playlists() {
 
 # Fetch watch later playlist
 fetch_watch_later() {
+    local auto_first="$1"
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "🕐 Fetching watch later..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1329,6 +1373,12 @@ fetch_watch_later() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     echo "⏳ Loading your watch later videos..."
     
@@ -1343,7 +1393,7 @@ fetch_watch_later() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$NUM_RESULTS" \
+        --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch watch later"
@@ -1354,14 +1404,14 @@ fetch_watch_later() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         local video_data
         video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
         
         if [ -n "$video_data" ]; then
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -1381,6 +1431,8 @@ fetch_watch_later() {
 
 # Fetch liked videos
 fetch_liked_videos() {
+    local auto_first="$1"
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "👍 Fetching liked videos..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1391,6 +1443,12 @@ fetch_liked_videos() {
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Determine how many results to fetch
+    local num_to_fetch="$NUM_RESULTS"
+    if [ "$auto_first" = "true" ]; then
+        num_to_fetch=1
+    fi
     
     echo "⏳ Loading your liked videos..."
     
@@ -1405,7 +1463,7 @@ fetch_liked_videos() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$NUM_RESULTS" \
+        --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch liked videos"
@@ -1416,14 +1474,14 @@ fetch_liked_videos() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
         local video_data
         video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
         
         if [ -n "$video_data" ]; then
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
         fi
     done < "$jsonfile"
     
@@ -1623,7 +1681,8 @@ play_video() {
         --ytdl-format="$format" \
         --volume="$VOLUME" \
         --audio-device=auto \
-        --window-maximized=yes; then
+        --autofit=100% \
+        --window-maximized; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "❌ Playback failed"
@@ -1787,32 +1846,32 @@ main() {
         # Fetch the appropriate content
         case "$personal_mode" in
             home)
-                if ! fetch_home_feed; then
+                if ! fetch_home_feed "$auto_first"; then
                     exit 1
                 fi
                 search_term="Home"
                 ;;
             subs)
-                if ! fetch_subscriptions_feed; then
+                if ! fetch_subscriptions_feed "$auto_first"; then
                     exit 1
                 fi
                 search_term="Subscriptions"
                 ;;
             playlists)
-                if ! fetch_user_playlists; then
+                if ! fetch_user_playlists "$auto_first"; then
                     exit 1
                 fi
                 search_playlists=true
                 search_term="Your Playlists"
                 ;;
             watch-later)
-                if ! fetch_watch_later; then
+                if ! fetch_watch_later "$auto_first"; then
                     exit 1
                 fi
                 search_term="Watch Later"
                 ;;
             liked)
-                if ! fetch_liked_videos; then
+                if ! fetch_liked_videos "$auto_first"; then
                     exit 1
                 fi
                 search_term="Liked Videos"
@@ -1953,7 +2012,7 @@ main() {
     fi
     
     # Search YouTube
-    if ! search_youtube "$search_term" "$search_playlists"; then
+    if ! search_youtube "$search_term" "$search_playlists" "$auto_first"; then
         exit 1
     fi
     
