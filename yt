@@ -664,9 +664,15 @@ search_youtube() {
         tput civis 2>/dev/null  # Hide cursor
         while kill -0 "$fetch_pid" 2>/dev/null; do
             if [ -f "$jsonfile" ]; then
-                progress_count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
-                progress_count=${progress_count//[^0-9]/}  # Remove non-numeric
+                # Count lines starting with { and sanitize the result
+                local count_raw
+                count_raw=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
+                # Extract only the first number from the output (handle multi-line output)
+                progress_count=$(echo "$count_raw" | head -1 | tr -cd '0-9' | grep -o '^[0-9]*' || echo "0")
+                # Ensure we have a valid number
                 [ -z "$progress_count" ] && progress_count=0
+                # Cap at expected number (defensive check)
+                [ "$progress_count" -gt "$num_to_fetch" ] && progress_count="$num_to_fetch"
             fi
             temp=${spinstr#?}
             printf "\r%s Fetching %ss... Found: %d/%d" "${spinstr:0:1}" "$content_type" "$progress_count" "$num_to_fetch"
