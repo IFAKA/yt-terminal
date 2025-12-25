@@ -9,6 +9,7 @@ A beautiful, fast terminal-based YouTube browser with video search, thumbnail pr
 - Interactive video selection with `fzf`
 - Thumbnail previews in the terminal (with `chafa`)
 - Audio-only mode for music and podcasts
+- **Smart caching** - search results cached for 1 hour
 - Real-time search progress with spinner
 - Plays videos with `mpv` for the best quality
 - Vim-style keybindings for navigation
@@ -146,12 +147,28 @@ yt -a https://youtube.com/watch?v=dQw4w9WgXcQ  # Audio only from URL
 - `-f, --first` - Auto-play the first search result (skip interactive selection)
 - `-a, --audio-only` - Play audio only (no video)
 - `-p, --playlist` - Search for playlists instead of videos
+- `--clear-cache` - Clear all cached search results and thumbnails
 - `-h, --help` - Show help message
 
 Options can be combined:
 ```bash
 yt -a -p -f study music     # Search playlists, auto-play first, audio only
 ```
+
+### Caching
+
+Search results and playlist metadata are automatically cached for 1 hour to improve performance and reduce unnecessary requests to YouTube. Cached searches load instantly!
+
+```bash
+yt lofi music              # Fetches from YouTube
+yt lofi music              # Loads from cache (instant!)
+yt --clear-cache           # Clear all caches
+```
+
+Cache locations:
+- Search results: `~/.cache/yt-search/`
+- Playlist metadata: `~/.cache/yt-playlists/`
+- Thumbnails: `~/.cache/yt-thumbnails/`
 
 ### Keybindings in fzf
 

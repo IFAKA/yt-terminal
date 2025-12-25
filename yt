@@ -11,6 +11,9 @@ DEFAULT_MAX_QUALITY=1080
 DEFAULT_TIMEOUT=90
 DEFAULT_VOLUME=100
 DEFAULT_CACHE_DIR="$HOME/.cache/yt-thumbnails"
+DEFAULT_SEARCH_CACHE_DIR="$HOME/.cache/yt-search"
+DEFAULT_PLAYLIST_CACHE_DIR="$HOME/.cache/yt-playlists"
+DEFAULT_CACHE_EXPIRY=3600  # 1 hour in seconds
 CONFIG_DIR="$HOME/.config/yt"
 CONFIG_FILE="$CONFIG_DIR/config"
 
@@ -22,11 +25,43 @@ load_config() {
     TIMEOUT=${TIMEOUT:-$DEFAULT_TIMEOUT}
     VOLUME=${VOLUME:-$DEFAULT_VOLUME}
     CACHE_DIR=${CACHE_DIR:-$DEFAULT_CACHE_DIR}
+    SEARCH_CACHE_DIR=${SEARCH_CACHE_DIR:-$DEFAULT_SEARCH_CACHE_DIR}
+    PLAYLIST_CACHE_DIR=${PLAYLIST_CACHE_DIR:-$DEFAULT_PLAYLIST_CACHE_DIR}
+    CACHE_EXPIRY=${CACHE_EXPIRY:-$DEFAULT_CACHE_EXPIRY}
+    
+    # Create cache directories
+    mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" 2>/dev/null
     
     # Load user config if it exists
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
+    fi
+}
+
+# Generate cache key from search term
+get_cache_key() {
+    local search_term="$1"
+    local search_type="$2"  # "video" or "playlist"
+    echo "${search_type}_$(echo -n "$search_term" | md5)"
+}
+
+# Check if cache is valid (not expired)
+is_cache_valid() {
+    local cache_file="$1"
+    
+    if [ ! -f "$cache_file" ]; then
+        return 1
+    fi
+    
+    local current_time=$(date +%s)
+    local file_time=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
+    local age=$((current_time - file_time))
+    
+    if [ "$age" -lt "$CACHE_EXPIRY" ]; then
+        return 0
+    else
+        return 1
     fi
 }
 
@@ -89,9 +124,10 @@ show_usage() {
     echo "Usage: yt [OPTIONS] <search term>"
     echo ""
     echo "Options:"
-    echo "  -f, --first       Auto-play first search result"
-    echo "  -a, --audio-only  Play audio only (no video)"
-    echo "  -p, --playlist    Search for playlists instead of videos"
+    echo "  -f, --first        Auto-play first search result"
+    echo "  -a, --audio-only   Play audio only (no video)"
+    echo "  -p, --playlist     Search for playlists instead of videos"
+    echo "  --clear-cache      Clear search and playlist cache"
     echo ""
     echo "Examples:"
     echo "  yt vim tutorial              # Search and select interactively"
@@ -101,8 +137,48 @@ show_usage() {
     echo "  yt -a -p chill music         # Browse playlists, play audio only"
     echo "  yt <url>                     # Play video from URL"
     echo ""
+    echo "Cache:"
+    echo "  Search results are cached for $((CACHE_EXPIRY / 60)) minutes"
+    echo "  Cache location: $SEARCH_CACHE_DIR"
+    echo ""
     echo "Version: $VERSION"
     echo "Configuration file: $CONFIG_FILE"
+}
+
+# Clear cache
+clear_cache() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🗑️  Clearing cache..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local deleted=0
+    
+    if [ -d "$SEARCH_CACHE_DIR" ]; then
+        local count=$(find "$SEARCH_CACHE_DIR" -type f | wc -l | xargs)
+        rm -rf "$SEARCH_CACHE_DIR"/*
+        deleted=$((deleted + count))
+        echo "✓ Cleared search cache ($count files)"
+    fi
+    
+    if [ -d "$PLAYLIST_CACHE_DIR" ]; then
+        local count=$(find "$PLAYLIST_CACHE_DIR" -type f | wc -l | xargs)
+        rm -rf "$PLAYLIST_CACHE_DIR"/*
+        deleted=$((deleted + count))
+        echo "✓ Cleared playlist cache ($count files)"
+    fi
+    
+    if [ -d "$CACHE_DIR" ]; then
+        local count=$(find "$CACHE_DIR" -name "*.jpg" | wc -l | xargs)
+        rm -rf "$CACHE_DIR"/*.jpg
+        deleted=$((deleted + count))
+        echo "✓ Cleared thumbnail cache ($count files)"
+    fi
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✅ Cleared $deleted cached items"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
 # Play video from URL
@@ -136,17 +212,37 @@ play_url() {
 }
 
 # Search YouTube for playlists
-search_playlists() {
+search_playlists_youtube() {
     local search_term="$1"
     
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📚 Searching YouTube playlists for: $search_term"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "⏳ Fetching playlists..."
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Check cache first
+    local cache_key
+    cache_key=$(get_cache_key "$search_term" "playlist")
+    local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
+    
+    if is_cache_valid "$cache_file"; then
+        echo "📦 Loading from cache..."
+        cp "$cache_file" "$tmpfile"
+        
+        # Display cached results
+        local count=0
+        while IFS=$'\t' read -r title _ id _; do
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$title" | cut -c1-60)..."
+        done < "$tmpfile"
+        echo ""
+        return 0
+    fi
+    
+    echo "⏳ Fetching playlists..."
     
     # URL-encode the search term
     local encoded_term
@@ -198,6 +294,9 @@ search_playlists() {
         return 1
     fi
     
+    # Cache the results
+    cp "$tmpfile" "$cache_file"
+    
     return 0
 }
 
@@ -208,7 +307,7 @@ search_youtube() {
     
     # Use different search for playlists
     if [ "$search_playlists" = "true" ]; then
-        search_playlists "$search_term"
+        search_playlists_youtube "$search_term"
         return $?
     fi
     
@@ -216,10 +315,30 @@ search_youtube() {
     echo "🔍 Searching YouTube for: $search_term"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "⏳ Fetching videos..."
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Check cache first
+    local cache_key
+    cache_key=$(get_cache_key "$search_term" "video")
+    local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
+    
+    if is_cache_valid "$cache_file"; then
+        echo "📦 Loading from cache..."
+        cp "$cache_file" "$tmpfile"
+        
+        # Display cached results
+        local count=0
+        while IFS=$'\t' read -r title _ _ _; do
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$title" | cut -c1-60)..."
+        done < "$tmpfile"
+        echo ""
+        return 0
+    fi
+    
+    echo "⏳ Fetching videos..."
     
     # Create temp file for raw JSON
     local jsonfile
@@ -256,6 +375,9 @@ search_youtube() {
         echo "❌ No results found!"
         return 1
     fi
+    
+    # Cache the results
+    cp "$tmpfile" "$cache_file"
     
     return 0
 }
@@ -313,6 +435,44 @@ preview_playlist() {
     echo "📚 Playlist Contents"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
+    
+    # Check cache first
+    local cache_file="$PLAYLIST_CACHE_DIR/$playlist_id.json"
+    
+    if is_cache_valid "$cache_file"; then
+        echo "📦 Cached playlist"
+        echo ""
+        
+        # Read from cache
+        local videos
+        videos=$(cat "$cache_file")
+        
+        # Display first 20 videos
+        local count=0
+        while IFS= read -r line; do
+            local video_title
+            video_title=$(echo "$line" | jq -r '.title // "Unknown"')
+            count=$((count + 1))
+            printf "%2d. %s\n" "$count" "$video_title"
+            [ "$count" -ge 20 ] && break
+        done <<< "$videos"
+        
+        # Get total count
+        local total_count
+        total_count=$(echo "$videos" | wc -l | xargs)
+        
+        if [ "$total_count" -gt 20 ]; then
+            echo ""
+            echo "... and $((total_count - 20)) more videos"
+        fi
+        
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Total: $total_count videos in playlist"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 0
+    fi
+    
     echo "⏳ Loading videos..."
     echo ""
     
@@ -345,7 +505,7 @@ preview_playlist() {
     local total_count
     total_count=$(echo "$videos" | wc -l | xargs)
     
-    # Check if there are more videos
+    # Check if there are more videos (but don't wait too long)
     local full_count
     full_count=$(timeout 5 yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
         --flat-playlist \
@@ -365,6 +525,9 @@ preview_playlist() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "Total: $total_count videos in playlist"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Cache the full result
+    echo "$videos" > "$cache_file"
 }
 
 # Play entire playlist
@@ -622,6 +785,10 @@ main() {
             -p|--playlist)
                 search_playlists=true
                 shift
+                ;;
+            --clear-cache)
+                clear_cache
+                exit 0
                 ;;
             -h|--help)
                 show_usage
