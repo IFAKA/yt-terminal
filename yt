@@ -68,36 +68,19 @@ load_config() {
     fi
 }
 
-# Detect available browsers for cookie extraction
+# Detect available browsers - simplified to let yt-dlp do the work
 detect_browsers() {
-    local browsers=()
+    local browsers=("brave" "firefox" "chrome" "safari" "edge")
+    local available=()
     
-    # Check for common browsers (including Brave)
-    if command -v brave &> /dev/null || [ -d "$HOME/Library/Application Support/BraveSoftware/Brave-Browser" ] || [ -d "$HOME/.config/BraveSoftware/Brave-Browser" ]; then
-        browsers+=("brave")
-    fi
+    for browser in "${browsers[@]}"; do
+        # Test if yt-dlp can actually extract cookies from this browser
+        if timeout 3 yt-dlp --cookies-from-browser "$browser" --simulate "https://youtube.com" &>/dev/null 2>&1; then
+            available+=("$browser")
+        fi
+    done
     
-    if command -v firefox &> /dev/null || [ -d "$HOME/Library/Application Support/Firefox" ] || [ -d "$HOME/.mozilla/firefox" ]; then
-        browsers+=("firefox")
-    fi
-    
-    if command -v google-chrome &> /dev/null || [ -d "$HOME/Library/Application Support/Google/Chrome" ] || [ -d "$HOME/.config/google-chrome" ]; then
-        browsers+=("chrome")
-    fi
-    
-    if [ -d "$HOME/Library/Application Support/Google/Chrome" ]; then
-        browsers+=("chrome")
-    fi
-    
-    if command -v safari &> /dev/null || [ -d "$HOME/Library/Safari" ]; then
-        browsers+=("safari")
-    fi
-    
-    if command -v microsoft-edge &> /dev/null || [ -d "$HOME/Library/Application Support/Microsoft Edge" ]; then
-        browsers+=("edge")
-    fi
-    
-    echo "${browsers[@]}"
+    echo "${available[@]}"
 }
 
 # Setup authentication for personal content
@@ -314,7 +297,6 @@ show_usage() {
     echo "  Note: Short flags can be combined in any order (e.g., -apf, -fap, -pfa)"
     echo ""
     echo "Personal Account:"
-    echo "  --me               Browse your YouTube account (interactive menu)"
     echo "  --home             View personalized recommendations"
     echo "  --subs             Browse latest videos from subscriptions"
     echo "  --playlists        Access your playlists"
@@ -334,7 +316,6 @@ show_usage() {
     echo "  yt --no-autoplay vim tutorial # Play once and exit (no autoplay)"
     echo "  yt <url>                     # Play video from URL"
     echo ""
-    echo "  yt --me                      # Interactive menu for your account"
     echo "  yt --subs                    # Latest from subscriptions"
     echo "  yt --home -a                 # Recommendations in audio-only mode"
     echo ""
@@ -416,8 +397,6 @@ play_url() {
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --audio-device=auto \
-        --autofit=100% \
         --window-maximized; then
         echo "❌ Error playing video"
         return 1
@@ -426,14 +405,38 @@ play_url() {
     return 0
 }
 
-# Search YouTube for playlists
-search_playlists_youtube() {
+# Unified YouTube search - handles both videos and playlists
+search_youtube() {
     local search_term="$1"
-    local auto_first="$2"
+    local search_playlists="$2"
+    local auto_first="$3"
     
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📚 Searching YouTube playlists for: $search_term"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    # Set search parameters based on type
+    local content_type content_icon search_url
+    if [ "$search_playlists" = "true" ]; then
+        content_type="playlist"
+        content_icon="📚"
+        # URL-encode the search term
+        local encoded_term
+        encoded_term=$(echo "$search_term" | sed 's/ /+/g')
+        search_url="https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D"
+    else
+        content_type="video"
+        content_icon="🔍"
+        local num_to_fetch="$NUM_RESULTS"
+        [ "$auto_first" = "true" ] && num_to_fetch=1
+        search_url="ytsearch${num_to_fetch}:$search_term"
+    fi
+    
+    if [ "$search_playlists" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "$content_icon Searching YouTube playlists for: $search_term"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "$content_icon Searching YouTube for: $search_term"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
     echo ""
     
     # Create temp file
@@ -447,7 +450,7 @@ search_playlists_youtube() {
     
     # Check cache first
     local cache_key
-    cache_key=$(get_cache_key "$search_term" "playlist")
+    cache_key=$(get_cache_key "$search_term" "$content_type")
     local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
     
     if is_cache_valid "$cache_file"; then
@@ -459,221 +462,66 @@ search_playlists_youtube() {
         while IFS=$'\t' read -r title _ id _; do
             count=$((count + 1))
             echo "  ✓ Found ($count/$num_to_fetch): $(echo "$title" | cut -c1-60)..."
-            [ "$auto_first" = "true" ] && break  # Only show first result if auto_first
+            [ "$auto_first" = "true" ] && break
         done < "$tmpfile"
         echo ""
         return 0
     fi
     
-    # URL-encode the search term
-    local encoded_term
-    encoded_term=$(echo "$search_term" | sed 's/ /+/g')
-    
     # Create temp file for raw JSON
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
-    # Use YouTube search URL with playlist filter (sp=EgIQAw%253D%253D)
-    # This filter specifically searches for playlists
+    # Fetch content
     local error_output
     error_output=$(mktemp)
     
-    # Run fetch with real-time progress
-    echo "Searching playlists..."
-    (
-        timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
-            --flat-playlist \
-            --dump-json \
-            --skip-download \
-            --no-warnings \
-            --quiet \
-            --playlist-end "$num_to_fetch" \
-            2>"$error_output" > "$jsonfile"
-    ) &
-    local fetch_pid=$!
-    
-    # Show progress as playlists are found
-    local count=0
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local temp
-    if [ -t 1 ]; then
-        tput civis 2>/dev/null  # Hide cursor
-        while kill -0 "$fetch_pid" 2>/dev/null; do
-            # Check how many playlists we've found so far
-            if [ -f "$jsonfile" ]; then
-                count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
-            fi
-            temp=${spinstr#?}
-            printf "\r%s Fetching playlists... Found: %d/%d" "${spinstr:0:1}" "$count" "$num_to_fetch"
-            spinstr=$temp${spinstr%"$temp"}
-            sleep 0.2
-        done
-        tput cnorm 2>/dev/null  # Show cursor
-        printf "\r"
-    else
-        echo "Fetching playlists from YouTube..."
-        wait "$fetch_pid"
-    fi
-    
-    wait "$fetch_pid" 2>/dev/null
-    local fetch_result=$?
-    
-    if [ "$fetch_result" -ne 0 ]; then
-        rm -f "$jsonfile"
-        
-        echo "❌ Search failed or timed out"
-        echo ""
-        
-        # Check if there's useful error info
-        if [ -s "$error_output" ]; then
-            echo "Error details:"
-            head -3 "$error_output" | sed 's/^/  /'
-            echo ""
-        fi
-        
-        echo "Troubleshooting steps:"
-        echo "  1. Update yt-dlp:"
-        if command -v brew &> /dev/null; then
-            echo "     brew upgrade yt-dlp"
-        elif command -v pip3 &> /dev/null; then
-            echo "     pip3 install --upgrade yt-dlp"
-        elif command -v pip &> /dev/null; then
-            echo "     pip install --upgrade yt-dlp"
-        else
-            echo "     Visit: https://github.com/yt-dlp/yt-dlp#installation"
-        fi
-        
-        echo ""
-        echo "  2. Check your internet connection"
-        echo "  3. Try a different search term"
-        
-        rm -f "$error_output"
-        return 1
-    fi
-    
-    rm -f "$error_output"
-    
-    # Parse and display results
-    local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        # Extract playlist info
-        local playlist_title playlist_id thumbnail
-        playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
-        playlist_id=$(echo "$line" | jq -r '.id // ""')
-        thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
-        
-        if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
-            # Store: title, "PL" (placeholder for count), id, thumbnail
-            echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
-            
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
-        fi
-    done < "$jsonfile"
-    
-    rm -f "$jsonfile"
-    echo ""
-    
-    # Check if we got any results
-    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No playlists found!"
-        return 1
-    fi
-    
-    # Cache the results
-    cp "$tmpfile" "$cache_file"
-    
-    return 0
-}
-
-# Search YouTube for videos
-search_youtube() {
-    local search_term="$1"
-    local search_playlists="$2"
-    local auto_first="$3"
-    
-    # Use different search for playlists
     if [ "$search_playlists" = "true" ]; then
-        search_playlists_youtube "$search_term" "$auto_first"
-        return $?
+        echo "Searching playlists..."
+        (
+            timeout "$TIMEOUT" yt-dlp "$search_url" \
+                --flat-playlist \
+                --dump-json \
+                --skip-download \
+                --no-warnings \
+                --quiet \
+                --playlist-end "$num_to_fetch" \
+                2>"$error_output" > "$jsonfile"
+        ) &
+    else
+        echo "Searching YouTube..."
+        (
+            timeout "$TIMEOUT" yt-dlp "$search_url" \
+                --dump-json \
+                --skip-download \
+                --no-warnings \
+                --quiet \
+                > "$jsonfile" 2>"$error_output"
+        ) &
     fi
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔍 Searching YouTube for: $search_term"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
-    # Check cache first
-    local cache_key
-    cache_key=$(get_cache_key "$search_term" "video")
-    local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
-    
-    if is_cache_valid "$cache_file"; then
-        echo "📦 Loading from cache..."
-        cp "$cache_file" "$tmpfile"
-        
-        # Display cached results
-        local count=0
-        while IFS=$'\t' read -r title _ _ _; do
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$title" | cut -c1-60)..."
-            [ "$auto_first" = "true" ] && break  # Only show first result if auto_first
-        done < "$tmpfile"
-        echo ""
-        return 0
-    fi
-    
-    # Create temp file for raw JSON
-    local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Fetch videos to temp file
-    local error_output
-    error_output=$(mktemp)
-    
-    # Run fetch with real-time progress
-    echo "Searching YouTube..."
-    (
-        timeout "$TIMEOUT" yt-dlp "ytsearch${num_to_fetch}:$search_term" \
-            --dump-json \
-            --skip-download \
-            --no-warnings \
-            --quiet \
-            > "$jsonfile" 2>"$error_output"
-    ) &
     local fetch_pid=$!
     
-    # Show progress as videos are found
-    local count=0
+    # Show progress with count
+    local progress_count=0
     local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local temp
     if [ -t 1 ]; then
         tput civis 2>/dev/null  # Hide cursor
         while kill -0 "$fetch_pid" 2>/dev/null; do
-            # Check how many videos we've found so far
             if [ -f "$jsonfile" ]; then
-                count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
-                count=${count//[^0-9]/}  # Remove any non-numeric characters
-                [ -z "$count" ] && count=0  # Default to 0 if empty
+                progress_count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
+                progress_count=${progress_count//[^0-9]/}  # Remove non-numeric
+                [ -z "$progress_count" ] && progress_count=0
             fi
             temp=${spinstr#?}
-            printf "\r%s Fetching videos... Found: %d/%d" "${spinstr:0:1}" "$count" "$num_to_fetch"
+            printf "\r%s Fetching %ss... Found: %d/%d" "${spinstr:0:1}" "$content_type" "$progress_count" "$num_to_fetch"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.2
         done
         tput cnorm 2>/dev/null  # Show cursor
         printf "\r"
     else
-        echo "Fetching videos from YouTube..."
+        echo "Fetching ${content_type}s from YouTube..."
         wait "$fetch_pid"
     fi
     
@@ -682,33 +530,12 @@ search_youtube() {
     
     if [ "$fetch_result" -ne 0 ]; then
         rm -f "$jsonfile"
-        
         echo "❌ Search failed or timed out"
-        echo ""
-        
-        # Check if there's useful error info
-        if [ -s "$error_output" ]; then
-            echo "Error details:"
-            head -3 "$error_output" | sed 's/^/  /'
-            echo ""
-        fi
-        
+        [ -s "$error_output" ] && echo "" && echo "Error details:" && head -3 "$error_output" | sed 's/^/  /' && echo ""
         echo "Troubleshooting steps:"
-        echo "  1. Update yt-dlp:"
-        if command -v brew &> /dev/null; then
-            echo "     brew upgrade yt-dlp"
-        elif command -v pip3 &> /dev/null; then
-            echo "     pip3 install --upgrade yt-dlp"
-        elif command -v pip &> /dev/null; then
-            echo "     pip install --upgrade yt-dlp"
-        else
-            echo "     Visit: https://github.com/yt-dlp/yt-dlp#installation"
-        fi
-        
-        echo ""
+        echo "  1. Update yt-dlp (brew upgrade yt-dlp or pip install --upgrade yt-dlp)"
         echo "  2. Check your internet connection"
         echo "  3. Try a different search term"
-        
         rm -f "$error_output"
         return 1
     fi
@@ -718,26 +545,34 @@ search_youtube() {
     # Parse and display results
     local count=0
     while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        # Parse video data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-        echo "$video_data" >> "$tmpfile"
-        
-        count=$((count + 1))
-        echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        if [ "$search_playlists" = "true" ]; then
+            local playlist_title playlist_id thumbnail
+            playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
+            playlist_id=$(echo "$line" | jq -r '.id // ""')
+            thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
+            
+            if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
+                echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
+                count=$((count + 1))
+                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
+            fi
+        else
+            video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+            echo "$video_data" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
     done < "$jsonfile"
     
     rm -f "$jsonfile"
     echo ""
     
-    # Check if we got any results
     if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No results found!"
+        echo "❌ No ${content_type}s found!"
         return 1
     fi
     
-    # Cache the results
     cp "$tmpfile" "$cache_file"
-    
     return 0
 }
 
@@ -936,8 +771,6 @@ play_playlist() {
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --audio-device=auto \
-        --autofit=100% \
         --window-maximized; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1147,12 +980,57 @@ get_related_playlists() {
     return 1
 }
 
-# Fetch home/recommendations feed
-fetch_home_feed() {
-    local auto_first="$1"
+# Unified personal feed fetcher - consolidates home, subs, playlists, watch-later, liked
+fetch_personal_feed() {
+    local feed_type="$1"  # home, subs, playlists, watch-later, liked
+    local auto_first="$2"
+    
+    # Map feed type to URL, icon, and description
+    local feed_url feed_icon feed_desc error_msg is_playlist
+    case "$feed_type" in
+        home)
+            feed_url="https://www.youtube.com/feed/recommended"
+            feed_icon="🏠"
+            feed_desc="personalized recommendations"
+            error_msg="No recommendations found!"
+            is_playlist=false
+            ;;
+        subs)
+            feed_url="https://www.youtube.com/feed/subscriptions"
+            feed_icon="📺"
+            feed_desc="subscriptions feed"
+            error_msg="No subscription videos found!"
+            is_playlist=false
+            ;;
+        playlists)
+            feed_url="https://www.youtube.com/feed/library"
+            feed_icon="📚"
+            feed_desc="your playlists"
+            error_msg="No playlists found!"
+            is_playlist=true
+            ;;
+        watch-later)
+            feed_url="https://www.youtube.com/playlist?list=WL"
+            feed_icon="🕐"
+            feed_desc="watch later"
+            error_msg="Watch later is empty!"
+            is_playlist=false
+            ;;
+        liked)
+            feed_url="https://www.youtube.com/playlist?list=LL"
+            feed_icon="👍"
+            feed_desc="liked videos"
+            error_msg="No liked videos found!"
+            is_playlist=false
+            ;;
+        *)
+            echo "❌ Unknown feed type: $feed_type"
+            return 1
+            ;;
+    esac
     
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🏠 Fetching personalized recommendations..."
+    echo "$feed_icon Fetching $feed_desc..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     
@@ -1168,14 +1046,14 @@ fetch_home_feed() {
         num_to_fetch=1
     fi
     
-    echo "⏳ Loading your recommendations..."
+    echo "⏳ Loading your $feed_desc..."
     
-    # Fetch recommended videos from YouTube home
+    # Fetch feed content
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
     # shellcheck disable=SC2086
-    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/recommended" \
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "$feed_url" \
         --flat-playlist \
         --dump-json \
         --skip-download \
@@ -1184,7 +1062,7 @@ fetch_home_feed() {
         --playlist-end "$num_to_fetch" \
         2>/dev/null > "$jsonfile"; then
         rm -f "$jsonfile"
-        echo "❌ Failed to fetch recommendations"
+        echo "❌ Failed to fetch $feed_desc"
         echo ""
         echo "Make sure you're logged into YouTube in your browser."
         return 1
@@ -1193,13 +1071,28 @@ fetch_home_feed() {
     # Parse and display results
     local count=0
     while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        local video_data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-        
-        if [ -n "$video_data" ]; then
-            echo "$video_data" >> "$tmpfile"
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        if [ "$is_playlist" = true ]; then
+            # Parse as playlist
+            local playlist_title playlist_id thumbnail
+            playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
+            playlist_id=$(echo "$line" | jq -r '.id // ""')
+            thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
+            
+            if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
+                echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
+                count=$((count + 1))
+                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
+            fi
+        else
+            # Parse as video
+            local video_data
+            video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+            
+            if [ -n "$video_data" ]; then
+                echo "$video_data" >> "$tmpfile"
+                count=$((count + 1))
+                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            fi
         fi
     done < "$jsonfile"
     
@@ -1207,297 +1100,26 @@ fetch_home_feed() {
     echo ""
     
     if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No recommendations found!"
+        echo "❌ $error_msg"
         return 1
     fi
     
-    echo "✅ Successfully fetched $count recommendations!"
+    if [ "$is_playlist" = true ]; then
+        echo "✅ Successfully fetched $count playlists!"
+    else
+        echo "✅ Successfully fetched $count videos!"
+    fi
     echo ""
     
     return 0
 }
 
-# Fetch subscriptions feed
-fetch_subscriptions_feed() {
-    local auto_first="$1"
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📺 Fetching subscriptions feed..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    local auth_args
-    auth_args=$(get_auth_args) || return 1
-    
-    # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
-    echo "⏳ Loading latest videos from your subscriptions..."
-    
-    # Fetch subscription feed
-    local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # shellcheck disable=SC2086
-    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/subscriptions" \
-        --flat-playlist \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        --playlist-end "$num_to_fetch" \
-        2>/dev/null > "$jsonfile"; then
-        rm -f "$jsonfile"
-        echo "❌ Failed to fetch subscriptions"
-        echo ""
-        echo "Make sure you're logged into YouTube in your browser."
-        return 1
-    fi
-    
-    # Parse and display results
-    local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        local video_data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-        
-        if [ -n "$video_data" ]; then
-            echo "$video_data" >> "$tmpfile"
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
-        fi
-    done < "$jsonfile"
-    
-    rm -f "$jsonfile"
-    echo ""
-    
-    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No subscription videos found!"
-        return 1
-    fi
-    
-    echo "✅ Successfully fetched $count videos!"
-    echo ""
-    
-    return 0
-}
-
-# Fetch user playlists
-fetch_user_playlists() {
-    local auto_first="$1"
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📚 Fetching your playlists..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    local auth_args
-    auth_args=$(get_auth_args) || return 1
-    
-    # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
-    echo "⏳ Loading your playlists..."
-    
-    # Fetch user's playlists
-    local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # shellcheck disable=SC2086
-    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/library" \
-        --flat-playlist \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        --playlist-end "$num_to_fetch" \
-        2>/dev/null > "$jsonfile"; then
-        rm -f "$jsonfile"
-        echo "❌ Failed to fetch playlists"
-        echo ""
-        echo "Make sure you're logged into YouTube in your browser."
-        return 1
-    fi
-    
-    # Parse and display results
-    local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        local playlist_title playlist_id thumbnail
-        playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
-        playlist_id=$(echo "$line" | jq -r '.id // ""')
-        thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
-        
-        if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
-            echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
-        fi
-    done < "$jsonfile"
-    
-    rm -f "$jsonfile"
-    echo ""
-    
-    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No playlists found!"
-        return 1
-    fi
-    
-    echo "✅ Successfully fetched $count playlists!"
-    echo ""
-    
-    return 0
-}
-
-# Fetch watch later playlist
-fetch_watch_later() {
-    local auto_first="$1"
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🕐 Fetching watch later..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    local auth_args
-    auth_args=$(get_auth_args) || return 1
-    
-    # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
-    echo "⏳ Loading your watch later videos..."
-    
-    # Fetch watch later playlist (WL)
-    local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # shellcheck disable=SC2086
-    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=WL" \
-        --flat-playlist \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        --playlist-end "$num_to_fetch" \
-        2>/dev/null > "$jsonfile"; then
-        rm -f "$jsonfile"
-        echo "❌ Failed to fetch watch later"
-        echo ""
-        echo "Make sure you're logged into YouTube in your browser."
-        return 1
-    fi
-    
-    # Parse and display results
-    local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        local video_data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-        
-        if [ -n "$video_data" ]; then
-            echo "$video_data" >> "$tmpfile"
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
-        fi
-    done < "$jsonfile"
-    
-    rm -f "$jsonfile"
-    echo ""
-    
-    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ Watch later is empty!"
-        return 1
-    fi
-    
-    echo "✅ Successfully fetched $count videos!"
-    echo ""
-    
-    return 0
-}
-
-# Fetch liked videos
-fetch_liked_videos() {
-    local auto_first="$1"
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "👍 Fetching liked videos..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    
-    local auth_args
-    auth_args=$(get_auth_args) || return 1
-    
-    # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
-    echo "⏳ Loading your liked videos..."
-    
-    # Fetch liked videos playlist (LL)
-    local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
-    
-    # shellcheck disable=SC2086
-    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=LL" \
-        --flat-playlist \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        --playlist-end "$num_to_fetch" \
-        2>/dev/null > "$jsonfile"; then
-        rm -f "$jsonfile"
-        echo "❌ Failed to fetch liked videos"
-        echo ""
-        echo "Make sure you're logged into YouTube in your browser."
-        return 1
-    fi
-    
-    # Parse and display results
-    local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
-        local video_data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-        
-        if [ -n "$video_data" ]; then
-            echo "$video_data" >> "$tmpfile"
-            count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
-        fi
-    done < "$jsonfile"
-    
-    rm -f "$jsonfile"
-    echo ""
-    
-    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No liked videos found!"
-        return 1
-    fi
-    
-    echo "✅ Successfully fetched $count videos!"
-    echo ""
-    
-    return 0
-}
+# Wrapper functions for backward compatibility
+fetch_home_feed() { fetch_personal_feed "home" "$1"; }
+fetch_subscriptions_feed() { fetch_personal_feed "subs" "$1"; }
+fetch_user_playlists() { fetch_personal_feed "playlists" "$1"; }
+fetch_watch_later() { fetch_personal_feed "watch-later" "$1"; }
+fetch_liked_videos() { fetch_personal_feed "liked" "$1"; }
 
 # Fetch next videos from personal feed for autoplay
 fetch_next_from_feed() {
@@ -1543,57 +1165,6 @@ fetch_next_from_feed() {
         2>/dev/null | while IFS= read -r line; do
             echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"'
         done
-}
-
-# Show account menu and handle selection
-show_account_menu() {
-    clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🏠 YouTube Account"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "What would you like to browse?"
-    echo ""
-    echo "  1. 🏠 Home / Recommendations"
-    echo "  2. 📺 Subscriptions Feed"
-    echo "  3. 📚 Your Playlists"
-    echo "  4. 🕐 Watch Later"
-    echo "  5. 👍 Liked Videos"
-    echo ""
-    echo "  q. Quit"
-    echo ""
-    echo -n "Choose [1-5, q]: "
-    
-    read -r choice
-    echo ""
-    
-    case "$choice" in
-        1)
-            return 1  # home
-            ;;
-        2)
-            return 2  # subs
-            ;;
-        3)
-            return 3  # playlists
-            ;;
-        4)
-            return 4  # watch later
-            ;;
-        5)
-            return 5  # liked
-            ;;
-        q|Q)
-            echo "Goodbye!"
-            exit 0
-            ;;
-        *)
-            echo "❌ Invalid choice"
-            sleep 1
-            show_account_menu
-            return $?
-            ;;
-    esac
 }
 
 # Countdown with ability to cancel
@@ -1680,8 +1251,6 @@ play_video() {
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --audio-device=auto \
-        --autofit=100% \
         --window-maximized; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1733,10 +1302,6 @@ main() {
                 ;;
             --no-autoplay)
                 autoplay=false
-                shift
-                ;;
-            --me)
-                personal_mode="me"
                 shift
                 ;;
             --home)
@@ -1828,20 +1393,6 @@ main() {
     
     # Handle personal mode
     if [ -n "$personal_mode" ]; then
-        # If --me, show menu and get choice
-        if [ "$personal_mode" = "me" ]; then
-            show_account_menu
-            local menu_choice=$?
-            
-            case $menu_choice in
-                1) personal_mode="home" ;;
-                2) personal_mode="subs" ;;
-                3) personal_mode="playlists" ;;
-                4) personal_mode="watch-later" ;;
-                5) personal_mode="liked" ;;
-                *) exit 1 ;;
-            esac
-        fi
         
         # Fetch the appropriate content
         case "$personal_mode" in
