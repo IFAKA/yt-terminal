@@ -209,15 +209,29 @@ setup_authentication() {
         browser_choice="${available_browsers[0]}"
         echo "Using ${browser_choice} (only browser detected)"
     else
-        echo -n "Choose browser [1-${#available_browsers[@]}]: "
-        read -r choice
+        # Check if Brave is available and use it as default
+        local brave_found=false
+        for browser in "${available_browsers[@]}"; do
+            if [ "$browser" = "brave" ]; then
+                brave_found=true
+                break
+            fi
+        done
         
-        if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
-            echo "❌ Invalid choice"
-            return 1
+        if [ "$brave_found" = true ]; then
+            browser_choice="brave"
+            echo "Using ${browser_choice} (default browser)"
+        else
+            echo -n "Choose browser [1-${#available_browsers[@]}]: "
+            read -r choice
+            
+            if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
+                echo "❌ Invalid choice"
+                return 1
+            fi
+            
+            browser_choice="${available_browsers[$((choice-1))]}"
         fi
-        
-        browser_choice="${available_browsers[$((choice-1))]}"
     fi
     
     echo ""
