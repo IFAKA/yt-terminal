@@ -165,6 +165,17 @@ print_box_line() {
     printf "${C_YT_RED}║${C_RESET}%*s${color}%s${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
 }
 
+print_box_line_left() {
+    local text="$1"
+    local width="${2:-78}"
+    local padding="  "  # Left padding
+    # Strip ANSI codes to get actual text length
+    local stripped_text=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local text_len=${#stripped_text}
+    local spaces_needed=$((width - text_len - 2))  # -2 for the padding
+    printf "${C_YT_RED}║${C_RESET}${padding}%b%*s${C_YT_RED}║${C_RESET}\n" "$text" "$spaces_needed" ""
+}
+
 print_gradient_text() {
     local text="$1"
     local colors=("$C_GRAD1" "$C_GRAD2" "$C_GRAD3" "$C_GRAD4" "$C_GRAD5")
@@ -1017,15 +1028,17 @@ play_playlist() {
         print_box_line "" 78
         print_box_line "$playlist_title" 78 "$C_YELLOW"
         print_box_line "" 78
-        draw_separator 80
-        echo -e "${C_GRAY}  URL: ${C_BLUE}$url${C_RESET}"
-        draw_separator 80
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line_left "${C_GRAY}URL: ${C_BLUE}$url${C_RESET}" 78
+        print_box_line "" 78
+        draw_middle_border 80
         print_box_line "" 78
         print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
         print_box_line "" 78
-        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
-        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
-        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line_left "${C_GRAY}Format:  ${C_WHITE}$format${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Volume:  ${C_WHITE}$VOLUME${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Device:  ${C_WHITE}auto${C_RESET}" 78
         print_box_line "" 78
         draw_bottom_border 80
     else
@@ -1037,15 +1050,17 @@ play_playlist() {
         print_box_line "" 78
         print_box_line "$playlist_title" 78 "$C_YELLOW"
         print_box_line "" 78
-        draw_separator 80
-        echo -e "${C_GRAY}  URL: ${C_BLUE}$url${C_RESET}"
-        draw_separator 80
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line_left "${C_GRAY}URL: ${C_BLUE}$url${C_RESET}" 78
+        print_box_line "" 78
+        draw_middle_border 80
         print_box_line "" 78
         print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
         print_box_line "" 78
-        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
-        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
-        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line_left "${C_GRAY}Format:  ${C_WHITE}$format${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Volume:  ${C_WHITE}$VOLUME${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Device:  ${C_WHITE}auto${C_RESET}" 78
         print_box_line "" 78
         draw_bottom_border 80
     fi
@@ -1367,7 +1382,7 @@ show_description_and_links() {
     print_box_line "" 78 >&2
     print_box_line "$video_title" 78 "$C_YELLOW" >&2
     print_box_line "" 78 >&2
-    echo -e "${C_YT_RED}  ║${C_RESET}  ${C_GREEN}Links found: ${C_WHITE}$link_count${C_RESET}                                                     ${C_YT_RED}║${C_RESET}" >&2
+    print_box_line_left "${C_GREEN}Links found: ${C_WHITE}$link_count${C_RESET}" 78 >&2
     print_box_line "" 78 >&2
     draw_bottom_border 80 >&2
     echo "" >&2
@@ -1905,16 +1920,18 @@ play_video() {
         print_box_line "" 78
         print_box_line "$title" 78 "$C_YELLOW"
         print_box_line "" 78
-        draw_separator 80
-        echo -e "${C_GRAY}  Video ID: ${C_WHITE}$video_id${C_RESET}"
-        echo -e "${C_GRAY}  URL:      ${C_BLUE}$url${C_RESET}"
-        draw_separator 80
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line_left "${C_GRAY}Video ID: ${C_WHITE}$video_id${C_RESET}" 78
+        print_box_line_left "${C_GRAY}URL:      ${C_BLUE}$url${C_RESET}" 78
+        print_box_line "" 78
+        draw_middle_border 80
         print_box_line "" 78
         print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
         print_box_line "" 78
-        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
-        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
-        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line_left "${C_GRAY}Format:  ${C_WHITE}$format${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Volume:  ${C_WHITE}$VOLUME${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Device:  ${C_WHITE}auto${C_RESET}" 78
         print_box_line "" 78
         draw_bottom_border 80
     else
@@ -1926,16 +1943,18 @@ play_video() {
         print_box_line "" 78
         print_box_line "$title" 78 "$C_YELLOW"
         print_box_line "" 78
-        draw_separator 80
-        echo -e "${C_GRAY}  Video ID: ${C_WHITE}$video_id${C_RESET}"
-        echo -e "${C_GRAY}  URL:      ${C_BLUE}$url${C_RESET}"
-        draw_separator 80
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line_left "${C_GRAY}Video ID: ${C_WHITE}$video_id${C_RESET}" 78
+        print_box_line_left "${C_GRAY}URL:      ${C_BLUE}$url${C_RESET}" 78
+        print_box_line "" 78
+        draw_middle_border 80
         print_box_line "" 78
         print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
         print_box_line "" 78
-        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
-        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
-        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line_left "${C_GRAY}Format:  ${C_WHITE}$format${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Volume:  ${C_WHITE}$VOLUME${C_RESET}" 78
+        print_box_line_left "${C_GRAY}Device:  ${C_WHITE}auto${C_RESET}" 78
         print_box_line "" 78
         draw_bottom_border 80
     fi
@@ -1988,12 +2007,12 @@ play_video() {
         print_box_line "" 78
         draw_middle_border 80
         print_box_line "" 78
-        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_GREEN}✓${C_RESET} Video is playing...  ${C_GRAY}(PID: $mpv_pid)${C_RESET}                               ${C_YT_RED}║${C_RESET}"
+        print_box_line_left "${C_GREEN}✓${C_RESET} Video is playing...  ${C_GRAY}(PID: $mpv_pid)${C_RESET}" 78
         print_box_line "" 78
         draw_separator 80
         print_box_line "" 78
-        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_CYAN}[d]${C_RESET} ${C_WHITE}Show description & links${C_RESET}                                      ${C_YT_RED}║${C_RESET}"
-        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_CYAN}[q]${C_RESET} ${C_WHITE}Stop playback${C_RESET}                                                 ${C_YT_RED}║${C_RESET}"
+        print_box_line_left "${C_CYAN}[d]${C_RESET} ${C_WHITE}Show description & links${C_RESET}" 78
+        print_box_line_left "${C_CYAN}[q]${C_RESET} ${C_WHITE}Stop playback${C_RESET}" 78
         print_box_line "" 78
         draw_bottom_border 80
         echo ""
