@@ -1963,7 +1963,8 @@ play_video() {
             --volume="$VOLUME" \
             --autofit=1920x1080 \
             --really-quiet \
-            --msg-level=all=error &
+            --msg-level=all=error \
+            2>/dev/null &
         local mpv_pid=$!
         
         # Show interactive prompt while video is playing
