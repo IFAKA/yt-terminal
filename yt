@@ -18,7 +18,7 @@ show_spinner() {
         
         while kill -0 "$pid" 2>/dev/null; do
             temp=${spinstr#?}
-            printf "\r%s %s" "${spinstr:0:1}" "$message"
+            printf "\r  ${C_CYAN}${spinstr:0:1}${C_RESET} ${C_WHITE}%s${C_RESET}" "$message"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.1
         done
@@ -95,15 +95,87 @@ announce() {
     echo "$message" >&2
 }
 
+# ANSI Color codes for beautiful terminal output
+C_RESET='\033[0m'
+C_BOLD='\033[1m'
+C_DIM='\033[2m'
+
+# Foreground colors
+C_RED='\033[38;5;196m'
+C_ORANGE='\033[38;5;208m'
+C_YELLOW='\033[38;5;226m'
+C_GREEN='\033[38;5;46m'
+C_CYAN='\033[38;5;51m'
+C_BLUE='\033[38;5;33m'
+C_PURPLE='\033[38;5;141m'
+C_MAGENTA='\033[38;5;201m'
+C_PINK='\033[38;5;213m'
+C_WHITE='\033[38;5;15m'
+C_GRAY='\033[38;5;244m'
+
+# YouTube brand colors
+C_YT_RED='\033[38;5;196m'
+C_YT_DARK='\033[38;5;235m'
+
+# Gradient effects (using different shades)
+C_GRAD1='\033[38;5;196m'  # Bright red
+C_GRAD2='\033[38;5;202m'  # Red-orange
+C_GRAD3='\033[38;5;208m'  # Orange
+C_GRAD4='\033[38;5;214m'  # Yellow-orange
+C_GRAD5='\033[38;5;220m'  # Yellow
+
 # Get color scheme based on accessibility mode
 get_fzf_colors() {
     if [ "$HIGH_CONTRAST_MODE" = "true" ]; then
         # High contrast: white on black with bright highlights
-        echo "fg:#ffffff,bg:#000000,hl:#ffff00,fg+:#ffffff,bg+:#000000,hl+:#ffff00,border:#ffffff"
+        echo "fg:#ffffff,bg:#000000,hl:#ffff00,fg+:#ffffff,bg+:#000000,hl+:#ffff00,border:#ffffff,prompt:#ffff00,pointer:#ffff00,marker:#00ff00,info:#00ffff,header:#ffffff"
     else
-        # Default YouTube-like colors
-        echo "fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000"
+        # Modern YouTube-inspired theme with gradients
+        echo "fg:#e0e0e0,bg:#0a0a0a,hl:#ff0000,fg+:#ffffff,bg+:#1a1a1a,hl+:#ff3333,border:#ff0000,prompt:#ff0000,pointer:#ff0000,marker:#00ff00,info:#00d9ff,header:#ff6b6b,gutter:#0a0a0a,scrollbar:#ff0000"
     fi
+}
+
+# Beautiful box drawing functions
+draw_top_border() {
+    local width="${1:-80}"
+    echo -e "${C_YT_RED}╔$(printf '═%.0s' $(seq 1 $((width - 2))))╗${C_RESET}"
+}
+
+draw_bottom_border() {
+    local width="${1:-80}"
+    echo -e "${C_YT_RED}╚$(printf '═%.0s' $(seq 1 $((width - 2))))╝${C_RESET}"
+}
+
+draw_middle_border() {
+    local width="${1:-80}"
+    echo -e "${C_YT_RED}╠$(printf '═%.0s' $(seq 1 $((width - 2))))╣${C_RESET}"
+}
+
+draw_separator() {
+    local width="${1:-80}"
+    echo -e "${C_GRAY}$(printf '─%.0s' $(seq 1 $width))${C_RESET}"
+}
+
+print_box_line() {
+    local text="$1"
+    local width="${2:-78}"
+    local color="${3:-$C_WHITE}"
+    local padding=$(( (width - ${#text}) / 2 ))
+    local right_padding=$(( width - ${#text} - padding ))
+    printf "${C_YT_RED}║${C_RESET}%*s${color}%s${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
+}
+
+print_gradient_text() {
+    local text="$1"
+    local colors=("$C_GRAD1" "$C_GRAD2" "$C_GRAD3" "$C_GRAD4" "$C_GRAD5")
+    local len=${#text}
+    local colors_len=${#colors[@]}
+    
+    for ((i=0; i<len; i++)); do
+        local color_idx=$((i * colors_len / len))
+        echo -ne "${colors[$color_idx]}${text:$i:1}"
+    done
+    echo -e "${C_RESET}"
 }
 
 # Detect available browsers - simplified to let yt-dlp do the work
@@ -123,14 +195,19 @@ detect_browsers() {
 
 # Setup authentication for personal content
 setup_authentication() {
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔐 Authentication Setup"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "To access personal content (subscriptions, playlists, etc.),"
-    echo "we need to use cookies from your browser."
-    echo ""
-    echo "This is safe and automatic - no passwords needed!"
+    clear
+    draw_top_border 80
+    print_box_line "" 78
+    print_box_line "🔐  AUTHENTICATION SETUP" 78 "$C_BOLD$C_CYAN"
+    print_box_line "" 78
+    draw_middle_border 80
+    print_box_line "" 78
+    print_box_line "To access personal content (subscriptions, playlists, etc.)," 78 "$C_WHITE"
+    print_box_line "we need to use cookies from your browser." 78 "$C_WHITE"
+    print_box_line "" 78
+    print_box_line "This is safe and automatic - no passwords needed!" 78 "$C_GREEN"
+    print_box_line "" 78
+    draw_bottom_border 80
     echo ""
     
     # Detect available browsers
@@ -562,7 +639,7 @@ play_url() {
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --window-maximized; then
+        --autofit=1920x1080; then
         echo "❌ Error playing video"
         return 1
     fi
@@ -594,13 +671,23 @@ search_youtube() {
     fi
     
     if [ "$search_playlists" = "true" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "$content_icon Searching YouTube playlists for: $search_term"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        clear
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "$content_icon  SEARCHING YOUTUBE PLAYLISTS" 78 "$C_BOLD$C_MAGENTA"
+        print_box_line "" 78
+        print_box_line "$search_term" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_bottom_border 80
     else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "$content_icon Searching YouTube for: $search_term"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        clear
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "$content_icon  SEARCHING YOUTUBE" 78 "$C_BOLD$C_YT_RED"
+        print_box_line "" 78
+        print_box_line "$search_term" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_bottom_border 80
     fi
     echo ""
     
@@ -619,14 +706,14 @@ search_youtube() {
     local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
     
     if is_cache_valid "$cache_file"; then
-        echo "📦 Loading from cache..."
+        echo -e "  ${C_CYAN}📦${C_RESET} ${C_WHITE}Loading from cache...${C_RESET}"
         cp "$cache_file" "$tmpfile"
         
         # Display cached results
         local count=0
         while IFS=$'\t' read -r title _ id _; do
             count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$title" | cut -c1-60)..."
+            echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$title" | cut -c1-60)${C_RESET}..."
             [ "$auto_first" = "true" ] && break
         done < "$tmpfile"
         echo ""
@@ -685,7 +772,12 @@ search_youtube() {
                 [ "$progress_count" -gt "$num_to_fetch" ] && progress_count="$num_to_fetch"
             fi
             temp=${spinstr#?}
-            printf "\r%s Fetching %ss... Found: %d/%d" "${spinstr:0:1}" "$content_type" "$progress_count" "$num_to_fetch"
+            local percent=$((progress_count * 100 / num_to_fetch))
+            local bar_width=30
+            local filled=$((percent * bar_width / 100))
+            local bar=$(printf "%${filled}s" "" | tr ' ' '█')
+            local empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
+            printf "\r  ${C_CYAN}${spinstr:0:1}${C_RESET} ${C_WHITE}Fetching %ss...${C_RESET} ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET} ${C_YELLOW}%d${C_RESET}/${C_WHITE}%d${C_RESET} ${C_DIM}(%d%%)${C_RESET}" "$content_type" "$progress_count" "$num_to_fetch" "$percent"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.2
         done
@@ -725,13 +817,13 @@ search_youtube() {
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
+                echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$playlist_title" | cut -c1-60)${C_RESET}..."
             fi
         else
             video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+            echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$line" | jq -r '.title' | cut -c1-60)${C_RESET}..."
         fi
     done < "$jsonfile"
     
@@ -778,9 +870,9 @@ download_thumbnails() {
     # Count actual non-empty lines
     items_count=$(echo "$results" | grep -c '^.')
     if [ "$search_playlists" = "true" ]; then
-        echo "✅ Successfully fetched $items_count playlists!"
+        echo -e "  ${C_GREEN}✓${C_RESET} Successfully fetched ${C_BOLD}${C_YELLOW}$items_count${C_RESET} ${C_WHITE}playlists${C_RESET}"
     else
-        echo "✅ Successfully fetched $items_count videos!"
+        echo -e "  ${C_GREEN}✓${C_RESET} Successfully fetched ${C_BOLD}${C_YELLOW}$items_count${C_RESET} ${C_WHITE}videos${C_RESET}"
     fi
     
     # Wait for thumbnails with spinner
@@ -789,7 +881,7 @@ download_thumbnails() {
     show_spinner "$sleep_pid" "Downloading thumbnails..."
     wait "$sleep_pid"
     
-    echo "✅ Ready!"
+    echo -e "  ${C_GREEN}✓${C_RESET} ${C_WHITE}Ready!${C_RESET}"
     sleep 0.5
     
     return 0
@@ -917,33 +1009,55 @@ play_playlist() {
     
     clear
     if [ "$audio_only" = "true" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🎵 PLAYING PLAYLIST (AUDIO ONLY)"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "🎵  PLAYING PLAYLIST  (AUDIO ONLY)" 78 "$C_BOLD$C_CYAN"
+        print_box_line "" 78
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line "$playlist_title" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_separator 80
+        echo -e "${C_GRAY}  URL: ${C_BLUE}$url${C_RESET}"
+        draw_separator 80
+        print_box_line "" 78
+        print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
+        print_box_line "" 78
+        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
+        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
+        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line "" 78
+        draw_bottom_border 80
     else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📚 PLAYING PLAYLIST"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "📚  PLAYING PLAYLIST" 78 "$C_BOLD$C_MAGENTA"
+        print_box_line "" 78
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line "$playlist_title" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_separator 80
+        echo -e "${C_GRAY}  URL: ${C_BLUE}$url${C_RESET}"
+        draw_separator 80
+        print_box_line "" 78
+        print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
+        print_box_line "" 78
+        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
+        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
+        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line "" 78
+        draw_bottom_border 80
     fi
     echo ""
-    echo "Playlist: $playlist_title"
-    echo "URL:      $url"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "MPV Settings:"
-    echo "  - Format: $format"
-    echo "  - Volume: $VOLUME"
-    echo "  - Audio Device: auto"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Starting playlist playback in 2 seconds..."
+    echo -e "${C_CYAN}Starting playlist playback in 2 seconds...${C_RESET}"
     sleep 2
     
     # Play playlist with mpv
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --window-maximized; then
+        --autofit=1920x1080; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "❌ Playback failed"
@@ -986,13 +1100,21 @@ select_video() {
     # Clear screen and show results (redirect to stderr to avoid capture)
     clear >&2
     if [ "$search_playlists" = "true" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-        echo "📚 YouTube Playlists: $search_term ($videos_count results)" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        draw_top_border 80 >&2
+        print_box_line "" 78 >&2
+        print_box_line "📚  YOUTUBE PLAYLISTS" 78 "$C_BOLD$C_PURPLE" >&2
+        print_box_line "" 78 >&2
+        print_box_line "$search_term  •  $videos_count results" 78 "$C_CYAN" >&2
+        print_box_line "" 78 >&2
+        draw_bottom_border 80 >&2
     else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-        echo "🎥 YouTube Search: $search_term ($videos_count results)" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        draw_top_border 80 >&2
+        print_box_line "" 78 >&2
+        print_box_line "🎥  YOUTUBE SEARCH" 78 "$C_BOLD$C_YT_RED" >&2
+        print_box_line "" 78 >&2
+        print_box_line "$search_term  •  $videos_count results" 78 "$C_CYAN" >&2
+        print_box_line "" 78 >&2
+        draw_bottom_border 80 >&2
     fi
     echo "" >&2
     
@@ -1005,7 +1127,9 @@ select_video() {
     if [ "$SCREEN_READER_MODE" = "true" ]; then
         nav_header="Navigate: j down, k up, Ctrl-d page down, Ctrl-u page up, Enter select, q quit"
     else
-        nav_header="[j/k] navigate | [Ctrl-d/u] page | [Enter] select | [q] quit"
+        nav_header="╭──────────────────────────────────────────────────────────────────────────────╮
+│  ⌨️  Navigation: [j/k] ↑↓  •  [Ctrl-d/u] Page  •  [Enter] Select  •  [q] Quit  │
+╰──────────────────────────────────────────────────────────────────────────────╯"
     fi
     
     # Different preview based on search mode
@@ -1014,16 +1138,22 @@ select_video() {
         
         # For playlist mode, show playlist contents
         selected=$(echo "$results" | fzf \
-            --height=90% \
+            --height=95% \
             --layout=reverse \
-            --border \
-            --prompt="📚 Playlist: " \
+            --border=rounded \
+            --border-label="╣ 📚 PLAYLISTS ╠" \
+            --border-label-pos=3 \
+            --prompt="▶ " \
             --header="$nav_header" \
             --preview="$0 --preview-playlist \$(echo {} | awk '{print \$NF}')" \
-            --preview-window=right:60%:wrap \
+            --preview-window=right:60%:wrap:border-rounded \
+            --preview-label="╣ 📋 Playlist Contents ╠" \
             --color="$fzf_colors" \
-            --pointer='▶' \
+            --pointer='❯' \
             --marker='✓' \
+            --separator='─' \
+            --scrollbar='│' \
+            --info=inline \
             --bind 'j:down,k:up' \
             --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
             --bind 'ctrl-f:page-down,ctrl-b:page-up' \
@@ -1035,16 +1165,22 @@ select_video() {
         
         # For videos, show thumbnail
         selected=$(echo "$results" | fzf \
-            --height=90% \
+            --height=95% \
             --layout=reverse \
-            --border \
-            --prompt="▶ Video: " \
+            --border=rounded \
+            --border-label="╣ 🎬 VIDEOS ╠" \
+            --border-label-pos=3 \
+            --prompt="▶ " \
             --header="$nav_header" \
             --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
-            --preview-window=right:40%:wrap \
+            --preview-window=right:40%:wrap:border-rounded \
+            --preview-label="╣ 🖼️  Preview ╠" \
             --color="$fzf_colors" \
-            --pointer='▶' \
+            --pointer='❯' \
             --marker='✓' \
+            --separator='─' \
+            --scrollbar='│' \
+            --info=inline \
             --bind 'j:down,k:up' \
             --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
             --bind 'ctrl-f:page-down,ctrl-b:page-up' \
@@ -1223,12 +1359,17 @@ show_description_and_links() {
     
     # Show interactive selector
     clear >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "📄 Video Links & Description" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "Video: $video_title" >&2
-    echo "Links found: $link_count" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    draw_top_border 80 >&2
+    print_box_line "" 78 >&2
+    print_box_line "📄  VIDEO LINKS & DESCRIPTION" 78 "$C_BOLD$C_CYAN" >&2
+    print_box_line "" 78 >&2
+    draw_middle_border 80 >&2
+    print_box_line "" 78 >&2
+    print_box_line "$video_title" 78 "$C_YELLOW" >&2
+    print_box_line "" 78 >&2
+    echo -e "${C_YT_RED}  ║${C_RESET}  ${C_GREEN}Links found: ${C_WHITE}$link_count${C_RESET}                                                     ${C_YT_RED}║${C_RESET}" >&2
+    print_box_line "" 78 >&2
+    draw_bottom_border 80 >&2
     echo "" >&2
     
     # Create a description preview file
@@ -1247,19 +1388,27 @@ show_description_and_links() {
     local selected
     selected=$(cat "$formatted_links" | fzf \
         --multi \
-        --height=90% \
+        --height=95% \
         --layout=reverse \
-        --border \
-        --prompt="🔗 " \
-        --header="[Tab] Multi-select  [Enter] Open  [c] Copy  [a] All  [q] Cancel" \
+        --border=rounded \
+        --border-label="╣ 🔗 LINKS ╠" \
+        --border-label-pos=3 \
+        --prompt="▶ " \
+        --header="╭────────────────────────────────────────────────────────────────────────────╮
+│  [Tab] Multi-select • [Enter] Open • [c] Copy • [a] All • [q] Cancel  │
+╰────────────────────────────────────────────────────────────────────────────╯" \
         --preview="cat $desc_file" \
-        --preview-window=down:50%:wrap \
+        --preview-window=down:50%:wrap:border-rounded \
+        --preview-label="╣ 📝 Description ╠" \
         --bind 'tab:toggle+down' \
         --bind 'c:execute-silent(echo {} | awk "{print \$1}" | pbcopy)+abort' \
         --bind "a:select-all+accept" \
         --color="$fzf_colors" \
-        --pointer='▶' \
-        --marker='✓')
+        --pointer='❯' \
+        --marker='✓' \
+        --separator='─' \
+        --scrollbar='│' \
+        --info=inline)
     
     # Clean up temp files
     rm -f "$links_file" "$formatted_links" "$desc_file"
@@ -1684,18 +1833,27 @@ countdown_autoplay() {
     local next_title="$2"
     
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔄 AUTOPLAY"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Next: $next_title"
+    draw_top_border 80
+    print_box_line "" 78
+    print_box_line "🔄  AUTOPLAY" 78 "$C_BOLD$C_GREEN"
+    print_box_line "" 78
+    draw_middle_border 80
+    print_box_line "" 78
+    print_box_line "Next Up:" 78 "$C_GRAY"
+    print_box_line "$next_title" 78 "$C_YELLOW"
+    print_box_line "" 78
+    draw_bottom_border 80
     echo ""
     
     for ((i=seconds; i>0; i--)); do
-        echo -ne "\rStarting in $i seconds... [Press Ctrl+C to stop autoplay] "
+        local bar_width=60
+        local filled=$((bar_width - (i * bar_width / seconds)))
+        local bar=$(printf "%${filled}s" "" | tr ' ' '█')
+        local empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
+        echo -ne "\r  ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET}  ${C_BOLD}${C_YELLOW}${i}s${C_RESET}  ${C_DIM}[Press Ctrl+C to stop]${C_RESET}  "
         sleep 1
     done
-    echo ""
+    echo -e "\n"
     
     return 0
 }
@@ -1721,13 +1879,17 @@ play_video() {
     clear
     if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
         if [ "$audio_only" = "true" ]; then
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "🎵 AUDIO PREVIEW"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            draw_top_border 80
+            print_box_line "" 78
+            print_box_line "🎵  AUDIO PREVIEW" 78 "$C_BOLD$C_CYAN"
+            print_box_line "" 78
+            draw_bottom_border 80
         else
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "▶ VIDEO PREVIEW"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            draw_top_border 80
+            print_box_line "" 78
+            print_box_line "▶️  VIDEO PREVIEW" 78 "$C_BOLD$C_YT_RED"
+            print_box_line "" 78
+            draw_bottom_border 80
         fi
         echo ""
         chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
@@ -1735,25 +1897,48 @@ play_video() {
     fi
     
     if [ "$audio_only" = "true" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🎵 PLAYING AUDIO"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "🎵  NOW PLAYING  (AUDIO ONLY)" 78 "$C_BOLD$C_CYAN"
+        print_box_line "" 78
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line "$title" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_separator 80
+        echo -e "${C_GRAY}  Video ID: ${C_WHITE}$video_id${C_RESET}"
+        echo -e "${C_GRAY}  URL:      ${C_BLUE}$url${C_RESET}"
+        draw_separator 80
+        print_box_line "" 78
+        print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
+        print_box_line "" 78
+        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
+        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
+        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line "" 78
+        draw_bottom_border 80
     else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "▶ PLAYING"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "▶️  NOW PLAYING" 78 "$C_BOLD$C_YT_RED"
+        print_box_line "" 78
+        draw_middle_border 80
+        print_box_line "" 78
+        print_box_line "$title" 78 "$C_YELLOW"
+        print_box_line "" 78
+        draw_separator 80
+        echo -e "${C_GRAY}  Video ID: ${C_WHITE}$video_id${C_RESET}"
+        echo -e "${C_GRAY}  URL:      ${C_BLUE}$url${C_RESET}"
+        draw_separator 80
+        print_box_line "" 78
+        print_box_line "⚙️  SETTINGS" 78 "$C_PURPLE"
+        print_box_line "" 78
+        echo -e "${C_GRAY}  Format:  ${C_WHITE}$format${C_RESET}"
+        echo -e "${C_GRAY}  Volume:  ${C_WHITE}$VOLUME${C_RESET}"
+        echo -e "${C_GRAY}  Device:  ${C_WHITE}auto${C_RESET}"
+        print_box_line "" 78
+        draw_bottom_border 80
     fi
-    echo ""
-    echo "Title:    $title"
-    echo "Video ID: $video_id"
-    echo "URL:      $url"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "MPV Settings:"
-    echo "  - Format: $format"
-    echo "  - Volume: $VOLUME"
-    echo "  - Audio Device: auto"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     
     # Different behavior for audio-only vs video mode
@@ -1767,7 +1952,7 @@ play_video() {
         if ! mpv "$url" \
             --ytdl-format="$format" \
             --volume="$VOLUME" \
-            --window-maximized; then
+            --autofit=1920x1080; then
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ Playback failed"
@@ -1790,20 +1975,27 @@ play_video() {
         mpv "$url" \
             --ytdl-format="$format" \
             --volume="$VOLUME" \
-            --window-maximized \
+            --autofit=1920x1080 \
             --really-quiet \
             --msg-level=all=error &
         local mpv_pid=$!
         
         # Show interactive prompt while video is playing
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🎬 Video playing... (PID: $mpv_pid)"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "Controls:"
-        echo "  [d] Show description & links"
-        echo "  [q] Stop playback"
+        draw_top_border 80
+        print_box_line "" 78
+        print_box_line "🎬  VIDEO CONTROLS" 78 "$C_BOLD$C_GREEN"
+        print_box_line "" 78
+        draw_middle_border 80
+        print_box_line "" 78
+        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_GREEN}✓${C_RESET} Video is playing...  ${C_GRAY}(PID: $mpv_pid)${C_RESET}                               ${C_YT_RED}║${C_RESET}"
+        print_box_line "" 78
+        draw_separator 80
+        print_box_line "" 78
+        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_CYAN}[d]${C_RESET} ${C_WHITE}Show description & links${C_RESET}                                      ${C_YT_RED}║${C_RESET}"
+        echo -e "${C_YT_RED}  ║${C_RESET}  ${C_CYAN}[q]${C_RESET} ${C_WHITE}Stop playback${C_RESET}                                                 ${C_YT_RED}║${C_RESET}"
+        print_box_line "" 78
+        draw_bottom_border 80
         echo ""
         
         # Listen for keypresses while MPV is running
