@@ -10,6 +10,7 @@ echo ""
 
 INSTALL_DIR="$HOME/.local/bin"
 CACHE_DIR="$HOME/.cache/yt-thumbnails"
+CONFIG_DIR="$HOME/.config/yt"
 
 # Remove the script
 if [ -f "$INSTALL_DIR/yt" ]; then
@@ -27,6 +28,15 @@ if [ -d "$CACHE_DIR" ]; then
     echo "✅ Cache removed"
 else
     echo "ℹ️  No cache directory found"
+fi
+
+# Remove config directory
+if [ -d "$CONFIG_DIR" ]; then
+    echo "🗑️  Removing config directory from $CONFIG_DIR..."
+    rm -rf "$CONFIG_DIR"
+    echo "✅ Config removed"
+else
+    echo "ℹ️  No config directory found"
 fi
 
 echo ""

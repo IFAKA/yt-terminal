@@ -113,6 +113,14 @@ Or use the one-liner installer again to get the latest version.
 
 To completely remove yt from your system (removes all traces):
 
+### Quick Uninstall (One-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/IFAKA/yt-terminal/main/uninstall.sh | bash
+```
+
+### Manual Uninstall
+
 ```bash
 cd yt-terminal
 ./uninstall.sh
@@ -121,6 +129,7 @@ cd yt-terminal
 This will remove:
 - The `yt` script from `~/.local/bin`
 - The thumbnail cache from `~/.cache/yt-thumbnails`
+- Configuration files from `~/.config/yt`
 
 ## How It Works
 
