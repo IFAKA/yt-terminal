@@ -49,7 +49,7 @@ jobs:
       - name: Test help message
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          yt 2>&1 | grep -q "Usage: yt"
+          yt --help 2>&1 | grep -q "Usage: yt"
       
       - name: Test uninstallation script
         run: |
