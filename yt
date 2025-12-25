@@ -92,14 +92,18 @@ check_dependencies() {
 
 # Show usage information
 show_usage() {
-    echo "Usage: yt <search term>"
-    echo "Example: yt vim tutorial"
+    echo "Usage: yt [OPTIONS] <search term>"
     echo ""
-    echo "Or play from URL:"
-    echo "  yt <url>"
+    echo "Options:"
+    echo "  -f, --first    Auto-play first search result"
+    echo ""
+    echo "Examples:"
+    echo "  yt vim tutorial              # Search and select interactively"
+    echo "  yt -f lofi hip hop           # Auto-play first result"
+    echo "  yt --first elrichmc          # Auto-play first result"
+    echo "  yt <url>                     # Play video from URL"
     echo ""
     echo "Version: $VERSION"
-    echo ""
     echo "Configuration file: $CONFIG_FILE"
 }
 
@@ -198,12 +202,28 @@ download_thumbnails() {
     return 0
 }
 
-# Select video with fzf
+# Select video with fzf or return first result
 select_video() {
     local search_term="$1"
+    local auto_first="$2"
     local videos_count
+    local selected
+    
     # Count actual non-empty lines
     videos_count=$(echo "$results" | grep -c '^.')
+    
+    # If auto-first flag is set, return first result
+    if [ "$auto_first" = "true" ]; then
+        selected=$(echo "$results" | head -n 1)
+        if [ -z "$selected" ]; then
+            echo "❌ No results found" >&2
+            return 1
+        fi
+        echo "🎯 Auto-playing first result..." >&2
+        echo "" >&2
+        echo "$selected"
+        return 0
+    fi
     
     # Clear screen and show results (redirect to stderr to avoid capture)
     clear >&2
@@ -213,7 +233,6 @@ select_video() {
     echo "" >&2
     
     # Use fzf with vim keybindings and thumbnail preview
-    local selected
     selected=$(echo "$results" | fzf \
         --height=90% \
         --layout=reverse \
@@ -305,7 +324,34 @@ main() {
     # Load configuration
     load_config
     
-    local search_term="$*"
+    # Parse flags
+    local auto_first=false
+    local search_term=""
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--first)
+                auto_first=true
+                shift
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            -*)
+                echo "Unknown option: $1"
+                show_usage
+                exit 1
+                ;;
+            *)
+                search_term="$search_term $1"
+                shift
+                ;;
+        esac
+    done
+    
+    # Trim leading/trailing whitespace
+    search_term=$(echo "$search_term" | xargs)
     
     # Check dependencies (always run before usage to give helpful error messages)
     if ! check_dependencies; then
@@ -337,7 +383,7 @@ main() {
     
     # Select video
     local selected
-    if ! selected=$(select_video "$search_term"); then
+    if ! selected=$(select_video "$search_term" "$auto_first"); then
         exit 0
     fi
     

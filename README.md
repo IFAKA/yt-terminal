@@ -67,6 +67,7 @@ source ~/.zshrc
 
 ### Search and Play Videos
 
+**Interactive selection (default):**
 ```bash
 yt <search term>
 ```
@@ -76,6 +77,18 @@ Example:
 yt elrichmc
 yt vim tutorial
 yt lofi hip hop
+```
+
+**Auto-play first result:**
+```bash
+yt -f <search term>
+yt --first <search term>
+```
+
+Example:
+```bash
+yt -f lofi hip hop          # Instantly plays first result
+yt --first morning music    # Perfect for quick playback
 ```
 
 ### Play Video from URL
@@ -88,6 +101,11 @@ Example:
 ```bash
 yt https://youtube.com/watch?v=dQw4w9WgXcQ
 ```
+
+### Options
+
+- `-f, --first` - Auto-play the first search result (skip interactive selection)
+- `-h, --help` - Show help message
 
 ### Keybindings in fzf
 
