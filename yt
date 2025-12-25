@@ -135,31 +135,91 @@ play_url() {
     return 0
 }
 
-# Search YouTube
-search_youtube() {
+# Search YouTube for playlists
+search_playlists() {
     local search_term="$1"
-    local search_playlists="$2"
     
-    # For playlist mode, automatically append " playlist" to help find playlist videos
-    if [ "$search_playlists" = "true" ]; then
-        search_term="$search_term playlist"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📚 Searching for: $search_term"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "ℹ️  Tip: Select a playlist video - the entire playlist will play!"
-        echo ""
-    else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🔍 Searching YouTube for: $search_term"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📚 Searching YouTube playlists for: $search_term"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "⏳ Fetching playlists..."
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
+    # URL-encode the search term
+    local encoded_term
+    encoded_term=$(echo "$search_term" | sed 's/ /+/g')
+    
+    # Create temp file for raw JSON
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Use YouTube search URL with playlist filter (sp=EgIQAw%253D%253D)
+    # This filter specifically searches for playlists
+    if ! timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Search failed or timed out"
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        # Extract playlist info
+        local playlist_title playlist_id thumbnail
+        playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
+        playlist_id=$(echo "$line" | jq -r '.id // ""')
+        thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
+        
+        if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
+            # Store: title, "PL" (placeholder for count), id, thumbnail
+            echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
+            
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$playlist_title" | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    # Check if we got any results
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ No playlists found!"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Search YouTube for videos
+search_youtube() {
+    local search_term="$1"
+    local search_playlists="$2"
+    
+    # Use different search for playlists
+    if [ "$search_playlists" = "true" ]; then
+        search_playlists "$search_term"
+        return $?
+    fi
+    
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔍 Searching YouTube for: $search_term"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
     echo "⏳ Fetching videos..."
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
     # Create temp file for raw JSON
     local jsonfile
@@ -206,8 +266,13 @@ download_thumbnails() {
     mkdir -p "$CACHE_DIR" || { echo "❌ Failed to create cache directory"; return 1; }
     
     while IFS=$'\t' read -r title duration id thumbnail; do
-        # Format result line - always use same format since playlist mode now searches for videos
-        results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
+        if [ "$search_playlists" = "true" ]; then
+            # Format playlist result line
+            results="${results}$(printf "%-85s %s" "$title" "$id")"$'\n'
+        else
+            # Format video result line
+            results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
+        fi
         
         # Download thumbnail in background for preview
         if [ -n "$thumbnail" ]; then
@@ -224,7 +289,11 @@ download_thumbnails() {
     
     # Count actual non-empty lines
     items_count=$(echo "$results" | grep -c '^.')
-    echo "✅ Successfully fetched $items_count videos!"
+    if [ "$search_playlists" = "true" ]; then
+        echo "✅ Successfully fetched $items_count playlists!"
+    else
+        echo "✅ Successfully fetched $items_count videos!"
+    fi
     echo "📥 Downloading thumbnails..."
     echo ""
     
@@ -236,44 +305,65 @@ download_thumbnails() {
     return 0
 }
 
-# Preview playlist contents for a video (for fzf preview)
+# Preview playlist contents (for fzf preview)
 preview_playlist() {
-    local video_id="$1"
+    local playlist_id="$1"
     
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📚 Checking for Playlist..."
+    echo "📚 Playlist Contents"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "⏳ Loading..."
+    echo "⏳ Loading videos..."
     echo ""
     
-    # Try to get playlist info from the video
-    local playlist_info
-    playlist_info=$(timeout 8 yt-dlp "https://youtube.com/watch?v=$video_id" \
+    # Fetch first 20 videos from playlist
+    local videos
+    videos=$(timeout 10 yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
+        --flat-playlist \
         --dump-json \
         --skip-download \
         --no-warnings \
         --quiet \
-        2>/dev/null | jq -r 'if .playlist_id then "\(.playlist_id)\t\(.playlist_title // "Playlist")\t\(.playlist_count // "?")" else empty end')
+        --playlist-end 20 \
+        2>/dev/null)
     
-    if [ -z "$playlist_info" ]; then
-        echo "ℹ️  No playlist found"
-        echo ""
-        echo "This video is not part of a playlist."
-        echo "It will play as a single video."
-        return 0
+    if [ -z "$videos" ]; then
+        echo "❌ Could not load playlist contents"
+        return 1
     fi
     
-    local playlist_id playlist_title playlist_count
-    IFS=$'\t' read -r playlist_id playlist_title playlist_count <<< "$playlist_info"
+    # Display first 20 videos
+    local count=0
+    while IFS= read -r line; do
+        local video_title
+        video_title=$(echo "$line" | jq -r '.title // "Unknown"')
+        count=$((count + 1))
+        printf "%2d. %s\n" "$count" "$video_title"
+    done <<< "$videos"
     
-    echo "✅ Found Playlist!"
-    echo ""
-    echo "Title: $playlist_title"
-    echo "Videos: $playlist_count"
+    # Get total count
+    local total_count
+    total_count=$(echo "$videos" | wc -l | xargs)
+    
+    # Check if there are more videos
+    local full_count
+    full_count=$(timeout 5 yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        2>/dev/null | wc -l | xargs)
+    
+    if [ -n "$full_count" ] && [ "$full_count" -gt 20 ]; then
+        echo ""
+        echo "... and $((full_count - 20)) more videos"
+        total_count=$full_count
+    fi
+    
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "The entire playlist will play when selected"
+    echo "Total: $total_count videos in playlist"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -364,26 +454,28 @@ select_video() {
     
     # Clear screen and show results (redirect to stderr to avoid capture)
     clear >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
     if [ "$search_playlists" = "true" ]; then
-        echo "📚 Playlist Mode: $search_term ($videos_count results)" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "📚 YouTube Playlists: $search_term ($videos_count results)" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
     else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
         echo "🎥 YouTube Search: $search_term ($videos_count results)" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
     fi
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
     echo "" >&2
     
     # Different preview based on search mode
     if [ "$search_playlists" = "true" ]; then
-        # For playlist mode, show if video has an associated playlist
+        # For playlist mode, show playlist contents
         selected=$(echo "$results" | fzf \
             --height=90% \
             --layout=reverse \
             --border \
-            --prompt="▶ " \
-            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] check & play | [q] quit" \
+            --prompt="📚 " \
+            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play playlist | [q] quit" \
             --preview="$0 --preview-playlist \$(echo {} | awk '{print \$NF}')" \
-            --preview-window=right:50%:wrap \
+            --preview-window=right:60%:wrap \
             --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
             --pointer='▶' \
             --marker='✓' \
@@ -584,44 +676,14 @@ main() {
         exit 0
     fi
     
-    # If playlist mode, try to find and play the playlist containing this video
+    # If playlist mode, play the selected playlist
     if [ "$search_playlists" = "true" ]; then
-        local video_id video_title
-        video_id=$(echo "$selected" | awk '{print $NF}')
-        video_title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
+        local playlist_id playlist_title
+        playlist_id=$(echo "$selected" | awk '{print $NF}')
+        playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
         
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📚 Looking for playlist containing this video..."
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        
-        # Try to get playlist ID from the video
-        local playlist_info
-        playlist_info=$(timeout 15 yt-dlp "https://youtube.com/watch?v=$video_id" \
-            --dump-json \
-            --skip-download \
-            --no-warnings \
-            --quiet \
-            2>/dev/null | jq -r 'if .playlist_id then "\(.playlist_id)\t\(.playlist_title // "Playlist")\t\(.playlist_count // "?")" else empty end')
-        
-        if [ -n "$playlist_info" ]; then
-            local playlist_id playlist_title playlist_count
-            IFS=$'\t' read -r playlist_id playlist_title playlist_count <<< "$playlist_info"
-            
-            echo "✅ Found playlist: $playlist_title ($playlist_count videos)"
-            echo ""
-            
-            if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
-                exit 1
-            fi
-        else
-            echo "ℹ️  No playlist found for this video, playing single video instead..."
-            echo ""
-            sleep 2
-            
-            if ! play_video "$selected" "$audio_only"; then
-                exit 1
-            fi
+        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
+            exit 1
         fi
     else
         # Play single video
