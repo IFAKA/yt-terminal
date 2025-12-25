@@ -173,7 +173,7 @@ setup_authentication() {
     
     # Detect available browsers
     local available_browsers
-    mapfile -t available_browsers < <(detect_browsers)
+    IFS=' ' read -r -a available_browsers <<< "$(detect_browsers)"
     
     if [ ${#available_browsers[@]} -eq 0 ]; then
         echo "❌ No supported browsers detected."
