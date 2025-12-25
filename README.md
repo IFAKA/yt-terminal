@@ -110,18 +110,23 @@ yt -a -f jazz music         # Auto-play first result, audio only
 
 ### Play Playlists
 
-Search for playlists and play the entire playlist:
+Search for videos and automatically detect & play their playlists:
 
 ```bash
 yt -p <search term>
 yt --playlist <search term>
 ```
 
+When you select a video, the tool will:
+1. Check if the video is part of a playlist
+2. Play the entire playlist if found
+3. Otherwise, play just the video
+
 Example:
 ```bash
-yt -p lofi playlists        # Search and play a playlist
-yt -p chill music           # Search and play a playlist
-yt -a -p study music        # Play playlist in audio-only mode
+yt -p lofi                  # Search "lofi playlist", select one to play entire playlist
+yt -p chill music           # Search "chill music playlist"
+yt -a -p study beats        # Play playlist in audio-only mode
 ```
 
 ### Play Video from URL
