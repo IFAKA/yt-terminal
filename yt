@@ -135,90 +135,51 @@ get_fzf_colors() {
     fi
 }
 
-# Beautiful box drawing functions
-draw_top_border() {
-    local width="${1:-80}"
-    echo -e "${C_YT_RED}╔$(printf '═%.0s' $(seq 1 $((width - 2))))╗${C_RESET}"
-}
-
-draw_bottom_border() {
-    local width="${1:-80}"
-    echo -e "${C_YT_RED}╚$(printf '═%.0s' $(seq 1 $((width - 2))))╝${C_RESET}"
-}
-
-draw_middle_border() {
-    local width="${1:-80}"
-    echo -e "${C_YT_RED}╠$(printf '═%.0s' $(seq 1 $((width - 2))))╣${C_RESET}"
-}
-
-draw_separator() {
-    local width="${1:-80}"
-    echo -e "${C_GRAY}$(printf '─%.0s' $(seq 1 $width))${C_RESET}"
+# Simplified box drawing functions
+draw_border() {
+    local type="$1"  # top, bottom, middle
+    local width="${2:-80}"
+    local char="═"
+    [ "$type" = "top" ] && echo -e "${C_YT_RED}╔$(printf "${char}%.0s" $(seq 1 $((width - 2))))╗${C_RESET}"
+    [ "$type" = "bottom" ] && echo -e "${C_YT_RED}╚$(printf "${char}%.0s" $(seq 1 $((width - 2))))╝${C_RESET}"
+    [ "$type" = "middle" ] && echo -e "${C_YT_RED}╠$(printf "${char}%.0s" $(seq 1 $((width - 2))))╣${C_RESET}"
 }
 
 print_box_line() {
     local text="$1"
     local width="${2:-78}"
     local color="${3:-$C_WHITE}"
-    local padding=$(( (width - ${#text}) / 2 ))
-    local right_padding=$(( width - ${#text} - padding ))
-    printf "${C_YT_RED}║${C_RESET}%*s${color}%s${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
+    # Strip ANSI for length calculation
+    local stripped=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local padding=$(( (width - ${#stripped}) / 2 ))
+    local right_padding=$(( width - ${#stripped} - padding ))
+    printf "${C_YT_RED}║${C_RESET}%*s${color}%b${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
 }
 
-print_box_line_left() {
-    local text="$1"
-    local width="${2:-78}"
-    local padding="  "  # Left padding
-    # Strip ANSI codes to get actual text length
-    local stripped_text=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
-    local text_len=${#stripped_text}
-    local spaces_needed=$((width - text_len - 2))  # -2 for the padding
-    printf "${C_YT_RED}║${C_RESET}${padding}%b%*s${C_YT_RED}║${C_RESET}\n" "$text" "$spaces_needed" ""
-}
-
-print_gradient_text() {
-    local text="$1"
-    local colors=("$C_GRAD1" "$C_GRAD2" "$C_GRAD3" "$C_GRAD4" "$C_GRAD5")
-    local len=${#text}
-    local colors_len=${#colors[@]}
-    
-    for ((i=0; i<len; i++)); do
-        local color_idx=$((i * colors_len / len))
-        echo -ne "${colors[$color_idx]}${text:$i:1}"
-    done
-    echo -e "${C_RESET}"
-}
-
-# Detect available browsers - simplified to let yt-dlp do the work
+# Detect available browsers
 detect_browsers() {
-    local browsers=("brave" "firefox" "chrome" "safari" "edge")
     local available=()
-    
-    for browser in "${browsers[@]}"; do
-        # Test if yt-dlp can actually extract cookies from this browser
-        if timeout 3 yt-dlp --cookies-from-browser "$browser" --simulate "https://youtube.com" &>/dev/null 2>&1; then
-            available+=("$browser")
-        fi
+    for browser in brave firefox chrome safari edge; do
+        timeout 3 yt-dlp --cookies-from-browser "$browser" --simulate "https://youtube.com" &>/dev/null && available+=("$browser")
     done
-    
     echo "${available[@]}"
 }
 
 # Setup authentication for personal content
 setup_authentication() {
     clear
-    draw_top_border 80
+    draw_border top 80
     print_box_line "" 78
     print_box_line "🔐  AUTHENTICATION SETUP" 78 "$C_BOLD$C_CYAN"
     print_box_line "" 78
-    draw_middle_border 80
+    draw_border middle 80
     print_box_line "" 78
     print_box_line "To access personal content (subscriptions, playlists, etc.)," 78 "$C_WHITE"
     print_box_line "we need to use cookies from your browser." 78 "$C_WHITE"
     print_box_line "" 78
     print_box_line "This is safe and automatic - no passwords needed!" 78 "$C_GREEN"
     print_box_line "" 78
-    draw_bottom_border 80
+    draw_border bottom 80
     echo ""
     
     # Detect available browsers
@@ -1570,7 +1531,7 @@ fetch_personal_feed() {
     return 0
 }
 
-# Wrapper functions for backward compatibility
+# Wrapper functions (kept for compatibility with tests)
 fetch_home_feed() { fetch_personal_feed "home" "$1"; }
 fetch_subscriptions_feed() { fetch_personal_feed "subs" "$1"; }
 fetch_user_playlists() { fetch_personal_feed "playlists" "$1"; }
@@ -1621,6 +1582,44 @@ fetch_next_from_feed() {
         2>/dev/null | while IFS= read -r line; do
             echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"'
         done
+}
+
+# Helper function to play selected content (video or playlist) with optional autoplay
+play_selected_content() {
+    local selected="$1"
+    local search_playlists="$2"
+    local audio_only="$3"
+    local autoplay="$4"
+    local personal_mode="$5"    # Optional
+    local search_term="$6"       # Optional
+    
+    if [ "$search_playlists" = "true" ]; then
+        local playlist_id playlist_title
+        playlist_id=$(echo "$selected" | awk '{print $NF}')
+        playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
+        
+        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
+            return 1
+        fi
+        
+        # Autoplay if enabled
+        if [ "$autoplay" = "true" ]; then
+            autoplay_loop "playlist" "$playlist_id" "$audio_only" "$personal_mode" "$search_term"
+        fi
+    else
+        if ! play_video "$selected" "$audio_only"; then
+            return 1
+        fi
+        
+        # Autoplay if enabled
+        if [ "$autoplay" = "true" ]; then
+            local video_id
+            video_id=$(echo "$selected" | awk '{print $NF}')
+            autoplay_loop "video" "$video_id" "$audio_only" "$personal_mode" "$search_term"
+        fi
+    fi
+    
+    return 0
 }
 
 # First-run tutorial and onboarding
@@ -1795,6 +1794,89 @@ countdown_autoplay() {
     return 0
 }
 
+# Unified autoplay loop - handles both videos and playlists
+autoplay_loop() {
+    local content_type="$1"  # "video" or "playlist"
+    local current_id="$2"
+    local audio_only="$3"
+    local personal_mode="$4"  # Optional: for personal feeds
+    local search_term="$5"    # Optional: for display
+    
+    local index=1  # Track position in personal feeds
+    
+    while true; do
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        if [ "$content_type" = "playlist" ]; then
+            echo "✅ Playlist finished"
+        else
+            echo "✅ Video finished"
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        local next_item
+        
+        # Get next item based on type
+        if [ "$content_type" = "playlist" ]; then
+            next_item=$(get_related_playlists "$current_id" 1)
+        else
+            # For personal feeds, fetch next from same feed
+            if [ -n "$personal_mode" ] && [ "$personal_mode" != "playlists" ]; then
+                echo "⏳ Loading next from your $search_term..."
+                next_item=$(fetch_next_from_feed "$personal_mode" "$index" 1)
+                index=$((index + 1))
+            else
+                # For regular searches, use related videos
+                next_item=$(get_related_videos "$current_id" 5 | head -n 1)
+            fi
+        fi
+        
+        if [ -z "$next_item" ]; then
+            echo "❌ No more content found"
+            break
+        fi
+        
+        # Parse next item based on type
+        if [ "$content_type" = "playlist" ]; then
+            local next_title next_id
+            next_title=$(echo "$next_item" | cut -f1)
+            next_id=$(echo "$next_item" | cut -f3)
+            
+            if ! countdown_autoplay 5 "$next_title"; then
+                break
+            fi
+            
+            current_id="$next_id"
+            
+            if ! play_playlist "$next_id" "$next_title" "$audio_only"; then
+                echo "❌ Failed to play next playlist"
+                break
+            fi
+        else
+            local next_title next_duration next_id next_thumbnail
+            IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_item"
+            local next_selected
+            next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
+            
+            # Download thumbnail
+            if [ -n "$next_thumbnail" ]; then
+                curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
+            fi
+            
+            if ! countdown_autoplay 3 "$next_title"; then
+                break
+            fi
+            
+            current_id="$next_id"
+            
+            if ! play_video "$next_selected" "$audio_only"; then
+                echo "❌ Failed to play next video"
+                break
+            fi
+        fi
+    done
+}
+
 # Play selected video
 play_video() {
     local selected="$1"
@@ -1816,17 +1898,17 @@ play_video() {
     clear
     if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
         if [ "$audio_only" = "true" ]; then
-            draw_top_border 80
+            draw_border top 80
             print_box_line "" 78
             print_box_line "🎵  AUDIO PREVIEW" 78 "$C_BOLD$C_CYAN"
             print_box_line "" 78
-            draw_bottom_border 80
+            draw_border bottom 80
         else
-            draw_top_border 80
+            draw_border top 80
             print_box_line "" 78
             print_box_line "▶️  VIDEO PREVIEW" 78 "$C_BOLD$C_YT_RED"
             print_box_line "" 78
-            draw_bottom_border 80
+            draw_border bottom 80
         fi
         echo ""
         chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
@@ -2099,162 +2181,33 @@ main() {
     
     # Handle personal mode
     if [ -n "$personal_mode" ]; then
-        
-        # Fetch the appropriate content
+        # Map personal mode to display name and fetch content
         case "$personal_mode" in
-            home)
-                if ! fetch_home_feed "$auto_first"; then
-                    exit 1
-                fi
-                search_term="Home"
-                ;;
-            subs)
-                if ! fetch_subscriptions_feed "$auto_first"; then
-                    exit 1
-                fi
-                search_term="Subscriptions"
-                ;;
-            playlists)
-                if ! fetch_user_playlists "$auto_first"; then
-                    exit 1
-                fi
-                search_playlists=true
-                search_term="Your Playlists"
-                ;;
-            watch-later)
-                if ! fetch_watch_later "$auto_first"; then
-                    exit 1
-                fi
-                search_term="Watch Later"
-                ;;
-            liked)
-                if ! fetch_liked_videos "$auto_first"; then
-                    exit 1
-                fi
-                search_term="Liked Videos"
-                ;;
+            home) search_term="Home" ;;
+            subs) search_term="Subscriptions" ;;
+            playlists) search_term="Your Playlists"; search_playlists=true ;;
+            watch-later) search_term="Watch Later" ;;
+            liked) search_term="Liked Videos" ;;
         esac
+        
+        # Fetch personal feed content
+        if ! fetch_personal_feed "$personal_mode" "$auto_first"; then
+            exit 1
+        fi
         
         # Download thumbnails and format results
         if ! download_thumbnails "$search_playlists"; then
             exit 1
         fi
         
-        # Select and play
+        # Select and play with unified function
         local selected
         if ! selected=$(select_video "$search_term" "$auto_first" "$search_playlists"); then
             exit 0
         fi
         
-        # Handle playlist or video playback
-        if [ "$search_playlists" = "true" ]; then
-            local playlist_id playlist_title
-            playlist_id=$(echo "$selected" | awk '{print $NF}')
-            playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
-            
-            if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
-                exit 1
-            fi
-            
-            # Autoplay for playlists (same as regular playlist flow)
-            if [ "$autoplay" = "true" ]; then
-                while true; do
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo "✅ Playlist finished"
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    
-                    local related_playlists
-                    related_playlists=$(get_related_playlists "$playlist_id" 1)
-                    
-                    if [ -z "$related_playlists" ]; then
-                        echo "❌ No more related playlists found"
-                        break
-                    fi
-                    
-                    local next_playlist
-                    next_playlist=$(echo "$related_playlists" | head -n 1)
-                    
-                    if [ -z "$next_playlist" ]; then
-                        echo "❌ No more related playlists found"
-                        break
-                    fi
-                    
-                    local next_pl_title next_pl_id
-                    next_pl_title=$(echo "$next_playlist" | cut -f1)
-                    next_pl_id=$(echo "$next_playlist" | cut -f3)
-                    
-                    if ! countdown_autoplay 5 "$next_pl_title"; then
-                        break
-                    fi
-                    
-                    playlist_id="$next_pl_id"
-                    
-                    if ! play_playlist "$next_pl_id" "$next_pl_title" "$audio_only"; then
-                        echo "❌ Failed to play next playlist"
-                        break
-                    fi
-                done
-            fi
-        else
-            # Play video
-            if ! play_video "$selected" "$audio_only"; then
-                exit 1
-            fi
-            
-            # Autoplay for videos - use personalized feed for personal content
-            if [ "$autoplay" = "true" ]; then
-                local current_video_id
-                current_video_id=$(echo "$selected" | awk '{print $NF}')
-                local video_index=1  # Track position in feed
-                
-                while true; do
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo "✅ Video finished"
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    
-                    local next_video
-                    
-                    # For personal feeds, fetch next from the same feed
-                    if [ "$personal_mode" = "home" ] || [ "$personal_mode" = "subs" ] || \
-                       [ "$personal_mode" = "watch-later" ] || [ "$personal_mode" = "liked" ]; then
-                        echo "⏳ Loading next from your $search_term..."
-                        next_video=$(fetch_next_from_feed "$personal_mode" "$video_index" 1)
-                        video_index=$((video_index + 1))
-                    else
-                        # For regular searches, use related videos
-                        local related_videos
-                        related_videos=$(get_related_videos "$current_video_id" 5)
-                        next_video=$(echo "$related_videos" | head -n 1)
-                    fi
-                    
-                    if [ -z "$next_video" ]; then
-                        echo "❌ No more videos found"
-                        break
-                    fi
-                    
-                    local next_title next_duration next_id next_thumbnail
-                    IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_video"
-                    local next_selected
-                    next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
-                    
-                    if [ -n "$next_thumbnail" ]; then
-                        curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
-                    fi
-                    
-                    if ! countdown_autoplay 3 "$next_title"; then
-                        break
-                    fi
-                    
-                    current_video_id="$next_id"
-                    
-                    if ! play_video "$next_selected" "$audio_only"; then
-                        echo "❌ Failed to play next video"
-                        break
-                    fi
-                done
-            fi
+        if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "$personal_mode" "$search_term"; then
+            exit 1
         fi
         
         exit 0
@@ -2278,129 +2231,14 @@ main() {
         exit 1
     fi
     
-    # Select video or playlist
+    # Select and play content with unified function
     local selected
     if ! selected=$(select_video "$search_term" "$auto_first" "$search_playlists"); then
         exit 0
     fi
     
-    # If playlist mode, play the selected playlist
-    if [ "$search_playlists" = "true" ]; then
-        local playlist_id playlist_title
-        playlist_id=$(echo "$selected" | awk '{print $NF}')
-        playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
-        
-        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
-            exit 1
-        fi
-        
-        # If autoplay enabled, continue with related playlists
-        if [ "$autoplay" = "true" ]; then
-            while true; do
-                echo ""
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "✅ Playlist finished"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                
-                # Get related playlists
-                local related_playlists
-                related_playlists=$(get_related_playlists "$playlist_id" 1)
-                
-                if [ -z "$related_playlists" ]; then
-                    echo "❌ No more related playlists found"
-                    break
-                fi
-                
-                # Get first related playlist
-                local next_playlist
-                next_playlist=$(echo "$related_playlists" | head -n 1)
-                
-                if [ -z "$next_playlist" ]; then
-                    echo "❌ No more related playlists found"
-                    break
-                fi
-                
-                # Extract playlist info
-                local next_pl_title next_pl_id
-                next_pl_title=$(echo "$next_playlist" | cut -f1)
-                next_pl_id=$(echo "$next_playlist" | cut -f3)
-                
-                # Countdown before playing next
-                if ! countdown_autoplay 5 "$next_pl_title"; then
-                    break
-                fi
-                
-                # Update current playlist ID for next iteration
-                playlist_id="$next_pl_id"
-                
-                # Play next playlist
-                if ! play_playlist "$next_pl_id" "$next_pl_title" "$audio_only"; then
-                    echo "❌ Failed to play next playlist"
-                    break
-                fi
-            done
-        fi
-    else
-        # Play single video
-        if ! play_video "$selected" "$audio_only"; then
-            exit 1
-        fi
-        
-        # If autoplay enabled, continue with related videos
-        if [ "$autoplay" = "true" ]; then
-            local current_video_id
-            current_video_id=$(echo "$selected" | awk '{print $NF}')
-            
-            while true; do
-                echo ""
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "✅ Video finished"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                
-                # Get related videos
-                local related_videos
-                related_videos=$(get_related_videos "$current_video_id" 5)
-                
-                if [ -z "$related_videos" ]; then
-                    echo "❌ No more related videos found"
-                    break
-                fi
-                
-                # Get first related video
-                local next_video
-                next_video=$(echo "$related_videos" | head -n 1)
-                
-                if [ -z "$next_video" ]; then
-                    echo "❌ No more related videos found"
-                    break
-                fi
-                
-                # Format as selected video
-                local next_title next_duration next_id next_thumbnail
-                IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_video"
-                local next_selected
-                next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
-                
-                # Download thumbnail for next video
-                if [ -n "$next_thumbnail" ]; then
-                    curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
-                fi
-                
-                # Countdown before playing next
-                if ! countdown_autoplay 3 "$next_title"; then
-                    break
-                fi
-                
-                # Update current video ID for next iteration
-                current_video_id="$next_id"
-                
-                # Play next video
-                if ! play_video "$next_selected" "$audio_only"; then
-                    echo "❌ Failed to play next video"
-                    break
-                fi
-            done
-        fi
+    if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "" "$search_term"; then
+        exit 1
     fi
     
     exit 0
