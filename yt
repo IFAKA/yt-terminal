@@ -100,29 +100,17 @@ C_RESET='\033[0m'
 C_BOLD='\033[1m'
 C_DIM='\033[2m'
 
-# Foreground colors
-C_RED='\033[38;5;196m'
-C_ORANGE='\033[38;5;208m'
+# Foreground colors (used throughout the script)
 C_YELLOW='\033[38;5;226m'
 C_GREEN='\033[38;5;46m'
 C_CYAN='\033[38;5;51m'
-C_BLUE='\033[38;5;33m'
 C_PURPLE='\033[38;5;141m'
 C_MAGENTA='\033[38;5;201m'
-C_PINK='\033[38;5;213m'
 C_WHITE='\033[38;5;15m'
 C_GRAY='\033[38;5;244m'
 
 # YouTube brand colors
 C_YT_RED='\033[38;5;196m'
-C_YT_DARK='\033[38;5;235m'
-
-# Gradient effects (using different shades)
-C_GRAD1='\033[38;5;196m'  # Bright red
-C_GRAD2='\033[38;5;202m'  # Red-orange
-C_GRAD3='\033[38;5;208m'  # Orange
-C_GRAD4='\033[38;5;214m'  # Yellow-orange
-C_GRAD5='\033[38;5;220m'  # Yellow
 
 # Get color scheme based on accessibility mode
 get_fzf_colors() {
@@ -150,7 +138,8 @@ print_box_line() {
     local width="${2:-78}"
     local color="${3:-$C_WHITE}"
     # Strip ANSI for length calculation
-    local stripped=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local stripped
+    stripped=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
     local padding=$(( (width - ${#stripped}) / 2 ))
     local right_padding=$(( width - ${#stripped} - padding ))
     printf "${C_YT_RED}║${C_RESET}%*s${color}%b${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
@@ -738,8 +727,10 @@ search_youtube() {
             local percent=$((progress_count * 100 / num_to_fetch))
             local bar_width=30
             local filled=$((percent * bar_width / 100))
-            local bar=$(printf "%${filled}s" "" | tr ' ' '█')
-            local empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
+            local bar
+            bar=$(printf "%${filled}s" "" | tr ' ' '█')
+            local empty
+            empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
             printf "\r  ${C_CYAN}${spinstr:0:1}${C_RESET} ${C_WHITE}Fetching %ss...${C_RESET} ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET} ${C_YELLOW}%d${C_RESET}/${C_WHITE}%d${C_RESET} ${C_DIM}(%d%%)${C_RESET}" "$content_type" "$progress_count" "$num_to_fetch" "$percent"
             spinstr=$temp${spinstr%"$temp"}
             sleep 0.2
@@ -1202,14 +1193,17 @@ get_video_info() {
 # Extract links from description with context
 extract_links_from_description() {
     local description="$1"
-    local tmpfile=$(mktemp)
+    local tmpfile
+    tmpfile=$(mktemp)
     
     # Extract URLs and try to get context (text before the URL)
     echo "$description" | grep -oE '.{0,40}https?://[^ ]+' | while IFS= read -r line; do
         # Extract the URL
-        local url=$(echo "$line" | grep -oE 'https?://[^ ]+')
+        local url
+        url=$(echo "$line" | grep -oE 'https?://[^ ]+')
         # Extract context (text before URL, cleaned up)
-        local context=$(echo "$line" | sed "s|$url||" | xargs)
+        local context
+        context=$(echo "$line" | sed "s|$url||" | xargs)
         
         # If no context, try to infer from URL
         if [ -z "$context" ] || [ ${#context} -lt 3 ]; then
@@ -1247,7 +1241,8 @@ show_description_and_links() {
     description=$(echo "$video_info" | jq -r '.description // "No description available"')
     
     # Extract links with context
-    local links_file=$(mktemp)
+    local links_file
+    links_file=$(mktemp)
     extract_links_from_description "$description" > "$links_file"
     
     local link_count
@@ -1268,7 +1263,8 @@ show_description_and_links() {
     fi
     
     # Format links for fzf
-    local formatted_links=$(mktemp)
+    local formatted_links
+    formatted_links=$(mktemp)
     while IFS=$'\t' read -r url context; do
         printf "%-60s  %s\n" "$url" "$context"
     done < "$links_file" > "$formatted_links"
@@ -1282,7 +1278,8 @@ show_description_and_links() {
     echo "" >&2
     
     # Create a description preview file
-    local desc_file=$(mktemp)
+    local desc_file
+    desc_file=$(mktemp)
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" > "$desc_file"
     echo "Full Description:" >> "$desc_file"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> "$desc_file"
@@ -1331,7 +1328,8 @@ show_description_and_links() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
     
     echo "$selected" | while IFS= read -r line; do
-        local url=$(echo "$line" | awk '{print $1}')
+        local url
+        url=$(echo "$line" | awk '{print $1}')
         echo "  Opening: $url" >&2
         open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "  ⚠️  Could not open: $url" >&2
         sleep 0.3  # Small delay between opening multiple links
@@ -1784,8 +1782,10 @@ countdown_autoplay() {
     for ((i=seconds; i>0; i--)); do
         local bar_width=50
         local filled=$((bar_width - (i * bar_width / seconds)))
-        local bar=$(printf "%${filled}s" "" | tr ' ' '█')
-        local empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
+        local bar
+        bar=$(printf "%${filled}s" "" | tr ' ' '█')
+        local empty
+        empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
         echo -ne "\r  ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET}  ${C_BOLD}${i}s${C_RESET}  ${C_DIM}(Ctrl+C to skip)${C_RESET}  "
         sleep 1
     done
