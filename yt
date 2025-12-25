@@ -171,6 +171,9 @@ setup_authentication() {
     draw_border bottom 80
     echo ""
     
+    echo "⏳ Detecting browsers (this may take a few seconds)..."
+    echo ""
+    
     # Detect available browsers
     local available_browsers
     IFS=' ' read -r -a available_browsers <<< "$(detect_browsers)"
@@ -180,7 +183,17 @@ setup_authentication() {
         echo ""
         echo "Supported browsers: Brave, Firefox, Chrome, Safari, Edge"
         echo ""
-        echo "Please make sure you're logged into YouTube in one of these browsers."
+        echo "Common issues:"
+        echo "  1. Browser is currently running (must be CLOSED)"
+        echo "  2. Not logged into YouTube in any browser"
+        echo ""
+        echo "Try these steps:"
+        echo "  1. Close ALL browsers completely"
+        echo "  2. Open ONE browser (e.g., Brave or Chrome)"
+        echo "  3. Go to youtube.com and log in"
+        echo "  4. Close the browser"
+        echo "  5. Run: yt --setup-auth"
+        echo ""
         return 1
     fi
     
@@ -211,14 +224,28 @@ setup_authentication() {
     echo "⏳ Testing authentication with ${browser_choice}..."
     
     # Test if we can extract cookies
-    if ! timeout 10 yt-dlp --cookies-from-browser "$browser_choice" --simulate "https://www.youtube.com/" &>/dev/null; then
+    local test_output
+    test_output=$(mktemp)
+    if ! timeout 10 yt-dlp --cookies-from-browser "$browser_choice" --simulate "https://www.youtube.com/" 2>"$test_output" >/dev/null; then
         echo "❌ Failed to extract cookies from ${browser_choice}"
         echo ""
+        
+        # Show error if helpful
+        if [ -s "$test_output" ]; then
+            echo "Error:"
+            grep -i "error\|warning\|failed" "$test_output" | head -3 | sed 's/^/  /'
+            echo ""
+        fi
+        
         echo "Make sure:"
         echo "  1. You're logged into YouTube in ${browser_choice}"
-        echo "  2. ${browser_choice} is not running (close it and try again)"
+        echo "  2. ${browser_choice} is COMPLETELY CLOSED (not just minimized)"
+        echo "  3. Try closing ${browser_choice}, waiting 5 seconds, then run this again"
+        echo ""
+        rm -f "$test_output"
         return 1
     fi
+    rm -f "$test_output"
     
     # Save to config
     {
@@ -495,6 +522,7 @@ show_usage() {
     echo ""
     echo "Other Options:"
     echo "  --clear-cache      Clear search and playlist cache"
+    echo "  --setup-auth       Re-configure browser authentication"
     echo "  -h, --help         Show this help message"
     echo ""
     echo "Examples:"
@@ -1468,6 +1496,8 @@ fetch_personal_feed() {
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
     # shellcheck disable=SC2086
+    local error_file
+    error_file=$(mktemp)
     if ! timeout "$TIMEOUT" yt-dlp $auth_args "$feed_url" \
         --flat-playlist \
         --dump-json \
@@ -1475,13 +1505,27 @@ fetch_personal_feed() {
         --no-warnings \
         --quiet \
         --playlist-end "$num_to_fetch" \
-        2>/dev/null > "$jsonfile"; then
+        2>"$error_file" > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "❌ Failed to fetch $feed_desc"
         echo ""
-        echo "Make sure you're logged into YouTube in your browser."
+        
+        # Show error details if available
+        if [ -s "$error_file" ]; then
+            echo "Error details:"
+            head -10 "$error_file" | sed 's/^/  /'
+            echo ""
+        fi
+        
+        echo "Troubleshooting:"
+        echo "  1. Make sure you're logged into YouTube in your browser"
+        echo "  2. Close your browser completely and try again"
+        echo "  3. Try running: yt-dlp $auth_args --simulate https://www.youtube.com/"
+        echo ""
+        rm -f "$error_file"
         return 1
     fi
+    rm -f "$error_file"
     
     # Parse and display results
     local count=0
@@ -1511,11 +1555,40 @@ fetch_personal_feed() {
         fi
     done < "$jsonfile"
     
+    # Debug: show what we got
+    if [ ! -s "$jsonfile" ]; then
+        echo "⚠️  Debug: No data received from yt-dlp"
+        echo ""
+        echo "This usually means:"
+        echo "  1. Browser cookies are not accessible"
+        echo "  2. Browser needs to be closed first"
+        echo "  3. You're not logged into YouTube in your browser"
+        echo ""
+        echo "Try these steps:"
+        echo "  1. Close $BROWSER completely"
+        echo "  2. Make sure you're logged into YouTube in $BROWSER"
+        echo "  3. Open $BROWSER, visit youtube.com, then close it"
+        echo "  4. Run this command again"
+        echo ""
+        rm -f "$jsonfile"
+        return 1
+    fi
+    
     rm -f "$jsonfile"
     echo ""
     
     if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
         echo "❌ $error_msg"
+        echo ""
+        echo "Debug info:"
+        echo "  - Browser: ${BROWSER:-not set}"
+        echo "  - Feed URL: $feed_url"
+        echo "  - Videos parsed: $count"
+        echo ""
+        echo "This might mean:"
+        echo "  1. You don't have any content in this feed"
+        echo "  2. Cookie authentication failed"
+        echo ""
         return 1
     fi
     
@@ -2101,6 +2174,14 @@ main() {
             --clear-cache)
                 clear_cache
                 exit 0
+                ;;
+            --setup-auth|--reconfigure)
+                # Remove existing browser config and re-run setup
+                if [ -f "$CONFIG_FILE" ]; then
+                    sed -i.bak '/^BROWSER=/d' "$CONFIG_FILE"
+                fi
+                setup_authentication
+                exit $?
                 ;;
             -h|--help)
                 show_usage
