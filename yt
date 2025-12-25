@@ -1,230 +1,442 @@
 #!/bin/bash
 # YouTube terminal browser with detailed progress and thumbnails
 
-search_term="$*"
+set -o pipefail
 
-if [ -z "$search_term" ]; then
+VERSION="1.0.0"
+
+# Default configuration
+DEFAULT_NUM_RESULTS=10
+DEFAULT_MAX_QUALITY=1080
+DEFAULT_TIMEOUT=90
+DEFAULT_VOLUME=100
+DEFAULT_CACHE_DIR="$HOME/.cache/yt-thumbnails"
+CONFIG_DIR="$HOME/.config/yt"
+CONFIG_FILE="$CONFIG_DIR/config"
+
+# Load configuration
+load_config() {
+    # Set defaults
+    NUM_RESULTS=${NUM_RESULTS:-$DEFAULT_NUM_RESULTS}
+    MAX_QUALITY=${MAX_QUALITY:-$DEFAULT_MAX_QUALITY}
+    TIMEOUT=${TIMEOUT:-$DEFAULT_TIMEOUT}
+    VOLUME=${VOLUME:-$DEFAULT_VOLUME}
+    CACHE_DIR=${CACHE_DIR:-$DEFAULT_CACHE_DIR}
+    
+    # Load user config if it exists
+    if [ -f "$CONFIG_FILE" ]; then
+        # shellcheck source=/dev/null
+        source "$CONFIG_FILE"
+    fi
+}
+
+# Cleanup function for temp files
+cleanup() {
+    local exit_code=$?
+    if [ -n "$tmpfile" ] && [ -f "$tmpfile" ]; then
+        rm -f "$tmpfile"
+    fi
+    if [ -n "$progressfile" ] && [ -f "$progressfile" ]; then
+        rm -f "$progressfile"
+    fi
+    if [ -n "$statusfile" ] && [ -f "$statusfile" ]; then
+        rm -f "$statusfile"
+    fi
+    exit "$exit_code"
+}
+
+trap cleanup EXIT INT TERM
+
+# Check dependencies
+check_dependencies() {
+    local missing_deps=()
+    local optional_deps=()
+    
+    # Required dependencies
+    command -v yt-dlp &> /dev/null || missing_deps+=("yt-dlp")
+    command -v mpv &> /dev/null || missing_deps+=("mpv")
+    command -v fzf &> /dev/null || missing_deps+=("fzf")
+    command -v jq &> /dev/null || missing_deps+=("jq")
+    command -v curl &> /dev/null || missing_deps+=("curl")
+    
+    # Optional dependencies
+    command -v chafa &> /dev/null || optional_deps+=("chafa")
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Missing required dependencies"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Please install the following:"
+        for dep in "${missing_deps[@]}"; do
+            echo "  • $dep"
+        done
+        echo ""
+        echo "Installation command (macOS):"
+        echo "  brew install ${missing_deps[*]}"
+        echo ""
+        echo "Installation command (Linux/Debian):"
+        echo "  sudo apt install ${missing_deps[*]}"
+        echo ""
+        return 1
+    fi
+    
+    if [ ${#optional_deps[@]} -ne 0 ]; then
+        echo "ℹ️  Optional: Install 'chafa' for thumbnail previews"
+        echo "   brew install chafa"
+        echo ""
+    fi
+    
+    return 0
+}
+
+# Show usage information
+show_usage() {
     echo "Usage: yt <search term>"
     echo "Example: yt vim tutorial"
     echo ""
     echo "Or play from URL:"
     echo "  yt <url>"
-    exit 1
-fi
+    echo ""
+    echo "Version: $VERSION"
+    echo ""
+    echo "Configuration file: $CONFIG_FILE"
+}
 
-# Check if input is a URL
-if [[ "$search_term" =~ ^https?:// ]]; then
+# Play video from URL
+play_url() {
+    local url="$1"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "▶ Playing video from URL..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    mpv "$search_term"
-    exit 0
-fi
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🔍 Searching YouTube for: $search_term"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# Create temp files
-tmpfile=$(mktemp)
-progressfile=$(mktemp)
-statusfile=$(mktemp)
-
-# Run search in background with verbose output
-(
-    echo "Initializing yt-dlp..." > "$statusfile"
-    sleep 1
     
-    echo "Querying YouTube search API..." > "$statusfile"
-    sleep 1
+    if ! mpv "$url" \
+        --ytdl-format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best" \
+        --volume="$VOLUME" \
+        --audio-device=auto; then
+        echo "❌ Error playing video"
+        return 1
+    fi
     
-    echo "Parsing video metadata..." > "$statusfile"
-    
-    yt-dlp "ytsearch10:$search_term" \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        2>/dev/null | while read -r line; do
-            # Parse each video as it comes - use TAB as delimiter
-            video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-            echo "$video_data" >> "$tmpfile"
-            
-            # Update status
-            count=$(wc -l < "$tmpfile")
-            echo "Processing video $count/10..." > "$statusfile"
-        done
-    
-    echo "Finalizing results..." > "$statusfile"
-    sleep 0.5
-    echo "done" > "$progressfile"
-) &
+    return 0
+}
 
-search_pid=$!
-
-# Show detailed progress
-spinner="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-count=0
-last_video_count=0
-
-while [ ! -f "$progressfile" ] || [ "$(cat "$progressfile")" != "done" ]; do
-    videos_found=$(wc -l < "$tmpfile" 2>/dev/null || echo 0)
-    status_msg=$(cat "$statusfile" 2>/dev/null || echo "Waiting...")
+# Search YouTube
+search_youtube() {
+    local search_term="$1"
     
-    # Get current spinner character
-    i=$(( count % 10 ))
-    spin_char="${spinner:$i:1}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔍 Searching YouTube for: $search_term"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    # Create temp files
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    progressfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    statusfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Run search in background with verbose output
+    (
+        echo "Initializing yt-dlp..." > "$statusfile"
+        sleep 1
+        
+        echo "Querying YouTube search API..." > "$statusfile"
+        sleep 1
+        
+        echo "Parsing video metadata..." > "$statusfile"
+        
+        if ! yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
+            --dump-json \
+            --skip-download \
+            --no-warnings \
+            --quiet \
+            2>/dev/null | while read -r line; do
+                # Parse each video as it comes - use TAB as delimiter
+                video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+                echo "$video_data" >> "$tmpfile"
+                
+                # Update status
+                count=$(wc -l < "$tmpfile")
+                echo "Processing video $count/$NUM_RESULTS..." > "$statusfile"
+            done; then
+            echo "error" > "$progressfile"
+            exit 1
+        fi
+        
+        echo "Finalizing results..." > "$statusfile"
+        sleep 0.5
+        echo "done" > "$progressfile"
+    ) &
+    
+    local search_pid=$!
     
     # Show detailed progress
-    printf "\r${spin_char} %s | Videos: %d/10" "$status_msg" "$videos_found"
+    show_search_progress "$search_pid"
+    local progress_result=$?
     
-    # Show when a new video is found
-    if [ "$videos_found" -gt "$last_video_count" ] && [ "$videos_found" -gt 0 ]; then
-        # Get the last video title (use tab delimiter)
-        last_video=$(tail -1 "$tmpfile" 2>/dev/null | cut -f1)
-        printf "\n  ✓ Found: %s\n" "${last_video:0:70}"
-        printf "${spin_char} %s | Videos: %d/10" "$status_msg" "$videos_found"
+    if [ $progress_result -ne 0 ]; then
+        return 1
     fi
-    last_video_count=$videos_found
     
-    count=$((count + 1))
-    sleep 0.1
+    # Wait for background process to finish
+    if ! wait "$search_pid"; then
+        echo ""
+        echo "❌ Search failed"
+        return 1
+    fi
     
-    # Timeout after 90 seconds
-    if [ $count -gt 900 ]; then
-        kill $search_pid 2>/dev/null
+    # Check for error state
+    if [ -f "$progressfile" ] && [ "$(cat "$progressfile")" = "error" ]; then
         echo ""
+        echo "❌ Error during search"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Show search progress with spinner
+show_search_progress() {
+    local search_pid=$1
+    local spinner="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    local count=0
+    local last_video_count=0
+    local timeout_count=$((TIMEOUT * 10))
+    
+    while [ ! -f "$progressfile" ] || [ "$(cat "$progressfile")" != "done" ]; do
+        # Check if search process is still running
+        if ! kill -0 "$search_pid" 2>/dev/null; then
+            if [ ! -f "$progressfile" ] || [ "$(cat "$progressfile")" != "done" ]; then
+                return 1
+            fi
+            break
+        fi
+        
+        videos_found=$(wc -l < "$tmpfile" 2>/dev/null || echo 0)
+        status_msg=$(cat "$statusfile" 2>/dev/null || echo "Waiting...")
+        
+        # Get current spinner character
+        local i=$(( count % 10 ))
+        local spin_char="${spinner:$i:1}"
+        
+        # Show detailed progress
+        printf "\r%s %s | Videos: %d/%d" "$spin_char" "$status_msg" "$videos_found" "$NUM_RESULTS"
+        
+        # Show when a new video is found
+        if [ "$videos_found" -gt "$last_video_count" ] && [ "$videos_found" -gt 0 ]; then
+            # Get the last video title (use tab delimiter)
+            local last_video
+            last_video=$(tail -1 "$tmpfile" 2>/dev/null | cut -f1)
+            printf "\n  ✓ Found: %s\n" "${last_video:0:70}"
+            printf "%s %s | Videos: %d/%d" "$spin_char" "$status_msg" "$videos_found" "$NUM_RESULTS"
+        fi
+        last_video_count=$videos_found
+        
+        count=$((count + 1))
+        sleep 0.1
+        
+        # Timeout check
+        if [ $count -gt "$timeout_count" ]; then
+            kill "$search_pid" 2>/dev/null
+            echo ""
+            echo ""
+            echo "❌ Timeout - YouTube is taking too long to respond"
+            echo "   Try again or use a simpler search term"
+            return 1
+        fi
+    done
+    
+    rm -f "$progressfile" "$statusfile"
+    echo ""
+    echo ""
+    
+    return 0
+}
+
+# Download thumbnails
+download_thumbnails() {
+    mkdir -p "$CACHE_DIR" || { echo "❌ Failed to create cache directory"; return 1; }
+    
+    while IFS=$'\t' read -r title duration id thumbnail; do
+        # Format the result line - add newline after each entry
+        results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
+        
+        # Download thumbnail in background for preview
+        if [ -n "$thumbnail" ]; then
+            curl -s "$thumbnail" -o "$CACHE_DIR/$id.jpg" 2>/dev/null &
+        fi
+    done < "$tmpfile"
+    
+    if [ -z "$results" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ No results found!"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    
+    videos_count=$(echo "$results" | wc -l | xargs)
+    echo "✅ Successfully fetched $videos_count videos!"
+    echo "📥 Downloading thumbnails..."
+    echo ""
+    
+    # Wait a bit for thumbnails to download
+    sleep 2
+    echo "✅ Ready!"
+    sleep 1
+    
+    return 0
+}
+
+# Select video with fzf
+select_video() {
+    local search_term="$1"
+    local videos_count
+    videos_count=$(echo "$results" | wc -l | xargs)
+    
+    # Clear screen and show results
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🎥 YouTube Search: $search_term ($videos_count results)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    # Use fzf with vim keybindings and thumbnail preview
+    local selected
+    selected=$(echo "$results" | fzf \
+        --height=90% \
+        --layout=reverse \
+        --border \
+        --prompt="▶ " \
+        --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play | [q] quit" \
+        --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
+        --preview-window=right:40%:wrap \
+        --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
+        --pointer='▶' \
+        --marker='✓' \
+        --bind 'j:down,k:up' \
+        --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
+        --bind 'ctrl-f:page-down,ctrl-b:page-up' \
+        --bind 'q:abort')
+    
+    if [ -z "$selected" ]; then
         echo ""
-        echo "❌ Timeout - YouTube is taking too long to respond"
-        echo "   Try again or use a simpler search term"
-        rm -f "$tmpfile" "$progressfile" "$statusfile"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Cancelled"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    
+    echo "$selected"
+    return 0
+}
+
+# Play selected video
+play_video() {
+    local selected="$1"
+    local video_id title url
+    
+    video_id=$(echo "$selected" | awk '{print $NF}')
+    title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
+    url="https://youtube.com/watch?v=$video_id"
+    
+    # Show thumbnail before playing
+    clear
+    if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "▶ VIDEO PREVIEW"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
+        echo ""
+    fi
+    
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "▶ PLAYING"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Title:    $title"
+    echo "Video ID: $video_id"
+    echo "URL:      $url"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "MPV Settings:"
+    echo "  - Format: bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
+    echo "  - Volume: $VOLUME"
+    echo "  - Audio Device: auto"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Starting playback in 2 seconds..."
+    sleep 2
+    
+    # Play with explicit settings
+    if ! mpv "$url" \
+        --ytdl-format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best" \
+        --volume="$VOLUME" \
+        --audio-device=auto; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Playback failed"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✅ Playback finished"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    return 0
+}
+
+# Main function
+main() {
+    # Load configuration
+    load_config
+    
+    # Check dependencies
+    if ! check_dependencies; then
         exit 1
     fi
-done
-
-# Wait for background process to finish
-wait $search_pid
-rm -f "$progressfile" "$statusfile"
-
-echo ""
-echo ""
-
-# Read results and format them
-results=""
-thumb_dir="$HOME/.cache/yt-thumbnails"
-mkdir -p "$thumb_dir"
-
-while IFS=$'\t' read -r title duration id thumbnail; do
-    # Format the result line - add newline after each entry
-    results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
     
-    # Download thumbnail in background for preview
-    if command -v curl &> /dev/null && [ -n "$thumbnail" ]; then
-        curl -s "$thumbnail" -o "$thumb_dir/$id.jpg" &
+    local search_term="$*"
+    
+    if [ -z "$search_term" ]; then
+        show_usage
+        exit 1
     fi
-done < "$tmpfile"
-
-rm -f "$tmpfile"
-
-if [ -z "$results" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "❌ No results found!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    exit 1
-fi
-
-videos_count=$(echo "$results" | wc -l | xargs)
-echo "✅ Successfully fetched $videos_count videos!"
-echo "📥 Downloading thumbnails..."
-echo ""
-
-# Wait a bit for thumbnails to download
-sleep 2
-echo "✅ Ready!"
-sleep 1
-
-# Clear screen and show results
-clear
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🎥 YouTube Search: $search_term ($videos_count results)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# Check if chafa is available for thumbnails
-if command -v chafa &> /dev/null; then
-    has_chafa=1
-else
-    has_chafa=0
-fi
-
-# Use fzf with vim keybindings and thumbnail preview
-selected=$(echo "$results" | fzf \
-    --height=90% \
-    --layout=reverse \
-    --border \
-    --prompt="▶ " \
-    --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play | [q] quit" \
-    --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$thumb_dir/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$thumb_dir/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
-    --preview-window=right:40%:wrap \
-    --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
-    --pointer='▶' \
-    --marker='✓' \
-    --bind 'j:down,k:up' \
-    --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
-    --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-    --bind 'q:abort')
-
-if [ -z "$selected" ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "❌ Cancelled"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Check if input is a URL
+    if [[ "$search_term" =~ ^https?:// ]]; then
+        if ! play_url "$search_term"; then
+            exit 1
+        fi
+        exit 0
+    fi
+    
+    # Search YouTube
+    if ! search_youtube "$search_term"; then
+        exit 1
+    fi
+    
+    # Download thumbnails and format results
+    if ! download_thumbnails; then
+        exit 1
+    fi
+    
+    # Select video
+    local selected
+    if ! selected=$(select_video "$search_term"); then
+        exit 0
+    fi
+    
+    # Play video
+    if ! play_video "$selected"; then
+        exit 1
+    fi
+    
     exit 0
-fi
+}
 
-# Extract video info
-video_id=$(echo "$selected" | awk '{print $NF}')
-title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
-url="https://youtube.com/watch?v=$video_id"
-
-# Show thumbnail before playing
-clear
-if command -v chafa &> /dev/null && [ -f "$thumb_dir/$video_id.jpg" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "▶ VIDEO PREVIEW"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    chafa --format=kitty --size=60x30 "$thumb_dir/$video_id.jpg" 2>/dev/null
-    echo ""
-fi
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "▶ PLAYING"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "Title:    $title"
-echo "Video ID: $video_id"
-echo "URL:      $url"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "MPV Settings:"
-echo "  - Format: bestvideo[height<=1080]+bestaudio/best"
-echo "  - Volume: 100"
-echo "  - Audio Device: auto (MacBook Pro Speakers)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "Starting playback in 2 seconds..."
-sleep 2
-
-# Play with explicit settings
-mpv "$url" \
-    --ytdl-format="bestvideo[height<=1080]+bestaudio/best" \
-    --volume=100 \
-    --audio-device=auto
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ Playback finished"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Run main function
+main "$@"

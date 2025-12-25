@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: warning
+          
+  test:
+    name: Test Installation
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yt-dlp mpv fzf jq curl
+      
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install yt-dlp mpv fzf jq curl
+      
+      - name: Test installation script
+        run: |
+          bash install.sh
+          test -f "$HOME/.local/bin/yt"
+          test -x "$HOME/.local/bin/yt"
+      
+      - name: Test help message
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          yt 2>&1 | grep -q "Usage: yt"
+      
+      - name: Test uninstallation script
+        run: |
+          bash uninstall.sh
+          test ! -f "$HOME/.local/bin/yt"
+  
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yt-dlp mpv fzf jq curl
+      
+      - name: Install bats
+        run: |
+          git clone https://github.com/bats-core/bats-core.git
+          cd bats-core
+          sudo ./install.sh /usr/local
+      
+      - name: Run integration tests
+        run: |
+          if [ -f tests/integration.bats ]; then
+            bats tests/integration.bats
+          else
+            echo "No integration tests found (tests/integration.bats)"
+          fi
