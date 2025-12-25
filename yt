@@ -311,6 +311,8 @@ show_usage() {
     echo "  -p, --playlist     Search for playlists instead of videos"
     echo "  --no-autoplay      Disable autoplay (autoplay is ON by default)"
     echo ""
+    echo "  Note: Short flags can be combined in any order (e.g., -apf, -fap, -pfa)"
+    echo ""
     echo "Personal Account:"
     echo "  --me               Browse your YouTube account (interactive menu)"
     echo "  --home             View personalized recommendations"
@@ -328,6 +330,7 @@ show_usage() {
     echo "  yt -f lofi hip hop           # Auto-play first result, then autoplay"
     echo "  yt -a music                  # Audio-only with autoplay"
     echo "  yt -p lofi playlists         # Browse & autoplay playlists"
+    echo "  yt -apf study music          # Chained: audio + playlist + first result"
     echo "  yt --no-autoplay vim tutorial # Play once and exit (no autoplay)"
     echo "  yt <url>                     # Play video from URL"
     echo ""
@@ -1655,15 +1658,15 @@ main() {
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -f|--first)
+            --first)
                 auto_first=true
                 shift
                 ;;
-            -a|--audio-only)
+            --audio-only)
                 audio_only=true
                 shift
                 ;;
-            -p|--playlist)
+            --playlist)
                 search_playlists=true
                 shift
                 ;;
@@ -1704,9 +1707,42 @@ main() {
                 exit 0
                 ;;
             -*)
-                echo "Unknown option: $1"
-                show_usage
-                exit 1
+                # Handle combined short flags (e.g., -apf, -fap, etc.)
+                # Check if it's a single dash followed by characters
+                if [[ "$1" =~ ^-[a-z]+$ ]]; then
+                    # Extract the flags without the leading dash
+                    local flags="${1#-}"
+                    # Process each character in the flag string
+                    while [ -n "$flags" ]; do
+                        local flag="${flags:0:1}"
+                        flags="${flags:1}"
+                        case "$flag" in
+                            f)
+                                auto_first=true
+                                ;;
+                            a)
+                                audio_only=true
+                                ;;
+                            p)
+                                search_playlists=true
+                                ;;
+                            h)
+                                show_usage
+                                exit 0
+                                ;;
+                            *)
+                                echo "Unknown option: -$flag"
+                                show_usage
+                                exit 1
+                                ;;
+                        esac
+                    done
+                else
+                    echo "Unknown option: $1"
+                    show_usage
+                    exit 1
+                fi
+                shift
                 ;;
             *)
                 search_term="$search_term $1"
