@@ -5,16 +5,19 @@ A beautiful, fast terminal-based YouTube browser with video search, thumbnail pr
 ## Features
 
 - Search YouTube directly from your terminal
+- **Personal account access** - subscriptions, playlists, recommendations, watch later, liked videos
 - Browse and search YouTube playlists
 - Interactive video selection with `fzf`
 - Thumbnail previews in the terminal (with `chafa`)
 - Audio-only mode for music and podcasts
 - **Smart caching** - search results cached for 1 hour
+- **Seamless authentication** - uses browser cookies automatically (Brave, Firefox, Chrome, Safari, Edge)
 - Real-time search progress with spinner
 - Plays videos with `mpv` for the best quality
 - Vim-style keybindings for navigation
 - Clean and colorful terminal UI
 - Play videos from URLs directly
+- Autoplay related content (YouTube-style)
 
 ## Preview
 
@@ -142,17 +145,42 @@ yt https://youtube.com/watch?v=dQw4w9WgXcQ
 yt -a https://youtube.com/watch?v=dQw4w9WgXcQ  # Audio only from URL
 ```
 
-### Options
+### Search Options
 
 - `-f, --first` - Auto-play the first search result (skip interactive selection)
 - `-a, --audio-only` - Play audio only (no video)
 - `-p, --playlist` - Search for playlists instead of videos
+- `--no-autoplay` - Disable autoplay (play once and exit)
+
+### Personal Account
+
+Access your personal YouTube content:
+
+- `--me` - Interactive menu to browse your account
+- `--home` - View personalized recommendations
+- `--subs` - Browse latest videos from subscriptions
+- `--playlists` - Access your playlists
+- `--watch-later` - View watch later queue
+- `--liked` - Browse liked videos
+
+Examples:
+```bash
+yt --me                    # Interactive menu
+yt --subs                  # Latest from subscriptions
+yt --home -a               # Recommendations in audio-only mode
+yt --playlists             # Your playlists
+yt --watch-later           # Watch later queue
+```
+
+### Other Options
+
 - `--clear-cache` - Clear all cached search results and thumbnails
 - `-h, --help` - Show help message
 
 Options can be combined:
 ```bash
 yt -a -p -f study music     # Search playlists, auto-play first, audio only
+yt --subs -a                # Subscriptions in audio-only mode
 ```
 
 ### Caching
@@ -169,6 +197,17 @@ Cache locations:
 - Search results: `~/.cache/yt-search/`
 - Playlist metadata: `~/.cache/yt-playlists/`
 - Thumbnails: `~/.cache/yt-thumbnails/`
+
+### Authentication
+
+Personal features (`--me`, `--home`, `--subs`, etc.) require authentication. The setup is **automatic and secure**:
+
+1. On first use of a personal feature, you'll be prompted to choose your browser
+2. The tool uses browser cookies (no passwords needed!)
+3. Supported browsers: **Brave**, Firefox, Chrome, Safari, Edge
+4. Authentication is saved to `~/.config/yt/config` - setup only once
+
+**Note:** Make sure you're logged into YouTube in your browser before using personal features.
 
 ### Keybindings in fzf
 

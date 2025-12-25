@@ -29,14 +29,145 @@ load_config() {
     PLAYLIST_CACHE_DIR=${PLAYLIST_CACHE_DIR:-$DEFAULT_PLAYLIST_CACHE_DIR}
     CACHE_EXPIRY=${CACHE_EXPIRY:-$DEFAULT_CACHE_EXPIRY}
     
-    # Create cache directories
-    mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" 2>/dev/null
+    # Create cache and config directories
+    mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" "$CONFIG_DIR" 2>/dev/null
     
     # Load user config if it exists
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
     fi
+}
+
+# Detect available browsers for cookie extraction
+detect_browsers() {
+    local browsers=()
+    
+    # Check for common browsers (including Brave)
+    if command -v brave &> /dev/null || [ -d "$HOME/Library/Application Support/BraveSoftware/Brave-Browser" ] || [ -d "$HOME/.config/BraveSoftware/Brave-Browser" ]; then
+        browsers+=("brave")
+    fi
+    
+    if command -v firefox &> /dev/null || [ -d "$HOME/Library/Application Support/Firefox" ] || [ -d "$HOME/.mozilla/firefox" ]; then
+        browsers+=("firefox")
+    fi
+    
+    if command -v google-chrome &> /dev/null || [ -d "$HOME/Library/Application Support/Google/Chrome" ] || [ -d "$HOME/.config/google-chrome" ]; then
+        browsers+=("chrome")
+    fi
+    
+    if [ -d "$HOME/Library/Application Support/Google/Chrome" ]; then
+        browsers+=("chrome")
+    fi
+    
+    if command -v safari &> /dev/null || [ -d "$HOME/Library/Safari" ]; then
+        browsers+=("safari")
+    fi
+    
+    if command -v microsoft-edge &> /dev/null || [ -d "$HOME/Library/Application Support/Microsoft Edge" ]; then
+        browsers+=("edge")
+    fi
+    
+    echo "${browsers[@]}"
+}
+
+# Setup authentication for personal content
+setup_authentication() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔐 Authentication Setup"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "To access personal content (subscriptions, playlists, etc.),"
+    echo "we need to use cookies from your browser."
+    echo ""
+    echo "This is safe and automatic - no passwords needed!"
+    echo ""
+    
+    # Detect available browsers
+    local available_browsers
+    available_browsers=($(detect_browsers))
+    
+    if [ ${#available_browsers[@]} -eq 0 ]; then
+        echo "❌ No supported browsers detected."
+        echo ""
+        echo "Supported browsers: Brave, Firefox, Chrome, Safari, Edge"
+        echo ""
+        echo "Please make sure you're logged into YouTube in one of these browsers."
+        return 1
+    fi
+    
+    echo "Detected browsers:"
+    for i in "${!available_browsers[@]}"; do
+        echo "  $((i+1)). ${available_browsers[$i]}"
+    done
+    echo ""
+    
+    # Auto-select if only one browser
+    local browser_choice
+    if [ ${#available_browsers[@]} -eq 1 ]; then
+        browser_choice="${available_browsers[0]}"
+        echo "Using ${browser_choice} (only browser detected)"
+    else
+        echo -n "Choose browser [1-${#available_browsers[@]}]: "
+        read -r choice
+        
+        if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
+            echo "❌ Invalid choice"
+            return 1
+        fi
+        
+        browser_choice="${available_browsers[$((choice-1))]}"
+    fi
+    
+    echo ""
+    echo "⏳ Testing authentication with ${browser_choice}..."
+    
+    # Test if we can extract cookies
+    if ! timeout 10 yt-dlp --cookies-from-browser "$browser_choice" --simulate "https://www.youtube.com/" &>/dev/null; then
+        echo "❌ Failed to extract cookies from ${browser_choice}"
+        echo ""
+        echo "Make sure:"
+        echo "  1. You're logged into YouTube in ${browser_choice}"
+        echo "  2. ${browser_choice} is not running (close it and try again)"
+        return 1
+    fi
+    
+    # Save to config
+    {
+        echo ""
+        echo "# Authentication (auto-configured)"
+        echo "AUTH_METHOD=\"browser\""
+        echo "BROWSER=\"$browser_choice\""
+    } >> "$CONFIG_FILE"
+    
+    # Reload config
+    load_config
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✅ Authentication configured!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Using: ${browser_choice} cookies"
+    echo "Saved to: $CONFIG_FILE"
+    echo ""
+    
+    return 0
+}
+
+# Get authentication arguments for yt-dlp
+get_auth_args() {
+    # Check if authentication is configured
+    if [ -z "$BROWSER" ]; then
+        # Not configured - run setup
+        if ! setup_authentication; then
+            return 1
+        fi
+    fi
+    
+    # Return the auth argument
+    echo "--cookies-from-browser $BROWSER"
+    return 0
 }
 
 # Generate cache key from search term
@@ -123,12 +254,23 @@ check_dependencies() {
 show_usage() {
     echo "Usage: yt [OPTIONS] <search term>"
     echo ""
-    echo "Options:"
+    echo "Search Options:"
     echo "  -f, --first        Auto-play first search result"
     echo "  -a, --audio-only   Play audio only (no video)"
     echo "  -p, --playlist     Search for playlists instead of videos"
     echo "  --no-autoplay      Disable autoplay (autoplay is ON by default)"
+    echo ""
+    echo "Personal Account:"
+    echo "  --me               Browse your YouTube account (interactive menu)"
+    echo "  --home             View personalized recommendations"
+    echo "  --subs             Browse latest videos from subscriptions"
+    echo "  --playlists        Access your playlists"
+    echo "  --watch-later      View watch later queue"
+    echo "  --liked            Browse liked videos"
+    echo ""
+    echo "Other Options:"
     echo "  --clear-cache      Clear search and playlist cache"
+    echo "  -h, --help         Show this help message"
     echo ""
     echo "Examples:"
     echo "  yt lofi beats                # Search, select, then autoplay related videos"
@@ -138,10 +280,18 @@ show_usage() {
     echo "  yt --no-autoplay vim tutorial # Play once and exit (no autoplay)"
     echo "  yt <url>                     # Play video from URL"
     echo ""
+    echo "  yt --me                      # Interactive menu for your account"
+    echo "  yt --subs                    # Latest from subscriptions"
+    echo "  yt --home -a                 # Recommendations in audio-only mode"
+    echo ""
     echo "Autoplay:"
     echo "  Autoplay is ENABLED by default - videos/playlists continue automatically"
     echo "  After your selection plays, related content plays next (YouTube-style)"
     echo "  Press Ctrl+C during countdown to stop autoplay"
+    echo ""
+    echo "Authentication:"
+    echo "  Personal features require browser cookies (Brave, Firefox, Chrome, etc.)"
+    echo "  Setup runs automatically on first use - no passwords needed!"
     echo ""
     echo "Cache:"
     echo "  Search results are cached for $((CACHE_EXPIRY / 60)) minutes"
@@ -790,6 +940,364 @@ get_related_playlists() {
     return 1
 }
 
+# Fetch home/recommendations feed
+fetch_home_feed() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🏠 Fetching personalized recommendations..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    echo "⏳ Loading your recommendations..."
+    
+    # Fetch recommended videos from YouTube home
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/recommended" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Failed to fetch recommendations"
+        echo ""
+        echo "Make sure you're logged into YouTube in your browser."
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        local video_data
+        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        
+        if [ -n "$video_data" ]; then
+            echo "$video_data" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ No recommendations found!"
+        return 1
+    fi
+    
+    echo "✅ Successfully fetched $count recommendations!"
+    echo ""
+    
+    return 0
+}
+
+# Fetch subscriptions feed
+fetch_subscriptions_feed() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📺 Fetching subscriptions feed..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    echo "⏳ Loading latest videos from your subscriptions..."
+    
+    # Fetch subscription feed
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/subscriptions" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Failed to fetch subscriptions"
+        echo ""
+        echo "Make sure you're logged into YouTube in your browser."
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        local video_data
+        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        
+        if [ -n "$video_data" ]; then
+            echo "$video_data" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ No subscription videos found!"
+        return 1
+    fi
+    
+    echo "✅ Successfully fetched $count videos!"
+    echo ""
+    
+    return 0
+}
+
+# Fetch user playlists
+fetch_user_playlists() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📚 Fetching your playlists..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    echo "⏳ Loading your playlists..."
+    
+    # Fetch user's playlists
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/feed/library" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Failed to fetch playlists"
+        echo ""
+        echo "Make sure you're logged into YouTube in your browser."
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        local playlist_title playlist_id thumbnail
+        playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
+        playlist_id=$(echo "$line" | jq -r '.id // ""')
+        thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
+        
+        if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
+            echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$playlist_title" | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ No playlists found!"
+        return 1
+    fi
+    
+    echo "✅ Successfully fetched $count playlists!"
+    echo ""
+    
+    return 0
+}
+
+# Fetch watch later playlist
+fetch_watch_later() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🕐 Fetching watch later..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    echo "⏳ Loading your watch later videos..."
+    
+    # Fetch watch later playlist (WL)
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=WL" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Failed to fetch watch later"
+        echo ""
+        echo "Make sure you're logged into YouTube in your browser."
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        local video_data
+        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        
+        if [ -n "$video_data" ]; then
+            echo "$video_data" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ Watch later is empty!"
+        return 1
+    fi
+    
+    echo "✅ Successfully fetched $count videos!"
+    echo ""
+    
+    return 0
+}
+
+# Fetch liked videos
+fetch_liked_videos() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "👍 Fetching liked videos..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    local auth_args
+    auth_args=$(get_auth_args) || return 1
+    
+    # Create temp file
+    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    echo "⏳ Loading your liked videos..."
+    
+    # Fetch liked videos playlist (LL)
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    if ! timeout "$TIMEOUT" yt-dlp $auth_args "https://www.youtube.com/playlist?list=LL" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-end "$NUM_RESULTS" \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Failed to fetch liked videos"
+        echo ""
+        echo "Make sure you're logged into YouTube in your browser."
+        return 1
+    fi
+    
+    # Parse and display results
+    local count=0
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+        local video_data
+        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        
+        if [ -n "$video_data" ]; then
+            echo "$video_data" >> "$tmpfile"
+            count=$((count + 1))
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
+    done < "$jsonfile"
+    
+    rm -f "$jsonfile"
+    echo ""
+    
+    if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
+        echo "❌ No liked videos found!"
+        return 1
+    fi
+    
+    echo "✅ Successfully fetched $count videos!"
+    echo ""
+    
+    return 0
+}
+
+# Show account menu and handle selection
+show_account_menu() {
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🏠 YouTube Account"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "What would you like to browse?"
+    echo ""
+    echo "  1. 🏠 Home / Recommendations"
+    echo "  2. 📺 Subscriptions Feed"
+    echo "  3. 📚 Your Playlists"
+    echo "  4. 🕐 Watch Later"
+    echo "  5. 👍 Liked Videos"
+    echo ""
+    echo "  q. Quit"
+    echo ""
+    echo -n "Choose [1-5, q]: "
+    
+    read -r choice
+    echo ""
+    
+    case "$choice" in
+        1)
+            return 1  # home
+            ;;
+        2)
+            return 2  # subs
+            ;;
+        3)
+            return 3  # playlists
+            ;;
+        4)
+            return 4  # watch later
+            ;;
+        5)
+            return 5  # liked
+            ;;
+        q|Q)
+            echo "Goodbye!"
+            exit 0
+            ;;
+        *)
+            echo "❌ Invalid choice"
+            sleep 1
+            show_account_menu
+            return $?
+            ;;
+    esac
+}
+
 # Countdown with ability to cancel
 countdown_autoplay() {
     local seconds="$1"
@@ -907,6 +1415,7 @@ main() {
     local search_playlists=false
     local autoplay=true  # Autoplay is now DEFAULT
     local search_term=""
+    local personal_mode=""  # me, home, subs, playlists, watch-later, liked
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -924,6 +1433,30 @@ main() {
                 ;;
             --no-autoplay)
                 autoplay=false
+                shift
+                ;;
+            --me)
+                personal_mode="me"
+                shift
+                ;;
+            --home)
+                personal_mode="home"
+                shift
+                ;;
+            --subs)
+                personal_mode="subs"
+                shift
+                ;;
+            --playlists)
+                personal_mode="playlists"
+                shift
+                ;;
+            --watch-later)
+                personal_mode="watch-later"
+                shift
+                ;;
+            --liked)
+                personal_mode="liked"
                 shift
                 ;;
             --clear-cache)
@@ -952,6 +1485,178 @@ main() {
     # Check dependencies (always run before usage to give helpful error messages)
     if ! check_dependencies; then
         exit 1
+    fi
+    
+    # Handle personal mode
+    if [ -n "$personal_mode" ]; then
+        # If --me, show menu and get choice
+        if [ "$personal_mode" = "me" ]; then
+            show_account_menu
+            local menu_choice=$?
+            
+            case $menu_choice in
+                1) personal_mode="home" ;;
+                2) personal_mode="subs" ;;
+                3) personal_mode="playlists" ;;
+                4) personal_mode="watch-later" ;;
+                5) personal_mode="liked" ;;
+                *) exit 1 ;;
+            esac
+        fi
+        
+        # Fetch the appropriate content
+        case "$personal_mode" in
+            home)
+                if ! fetch_home_feed; then
+                    exit 1
+                fi
+                search_term="Home"
+                ;;
+            subs)
+                if ! fetch_subscriptions_feed; then
+                    exit 1
+                fi
+                search_term="Subscriptions"
+                ;;
+            playlists)
+                if ! fetch_user_playlists; then
+                    exit 1
+                fi
+                search_playlists=true
+                search_term="Your Playlists"
+                ;;
+            watch-later)
+                if ! fetch_watch_later; then
+                    exit 1
+                fi
+                search_term="Watch Later"
+                ;;
+            liked)
+                if ! fetch_liked_videos; then
+                    exit 1
+                fi
+                search_term="Liked Videos"
+                ;;
+        esac
+        
+        # Download thumbnails and format results
+        if ! download_thumbnails "$search_playlists"; then
+            exit 1
+        fi
+        
+        # Select and play
+        local selected
+        if ! selected=$(select_video "$search_term" "$auto_first" "$search_playlists"); then
+            exit 0
+        fi
+        
+        # Handle playlist or video playback
+        if [ "$search_playlists" = "true" ]; then
+            local playlist_id playlist_title
+            playlist_id=$(echo "$selected" | awk '{print $NF}')
+            playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
+            
+            if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
+                exit 1
+            fi
+            
+            # Autoplay for playlists (same as regular playlist flow)
+            if [ "$autoplay" = "true" ]; then
+                while true; do
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "✅ Playlist finished"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    
+                    local related_playlists
+                    related_playlists=$(get_related_playlists "$playlist_id" 1)
+                    
+                    if [ -z "$related_playlists" ]; then
+                        echo "❌ No more related playlists found"
+                        break
+                    fi
+                    
+                    local next_playlist
+                    next_playlist=$(echo "$related_playlists" | head -n 1)
+                    
+                    if [ -z "$next_playlist" ]; then
+                        echo "❌ No more related playlists found"
+                        break
+                    fi
+                    
+                    local next_pl_title next_pl_id
+                    next_pl_title=$(echo "$next_playlist" | cut -f1)
+                    next_pl_id=$(echo "$next_playlist" | cut -f3)
+                    
+                    if ! countdown_autoplay 5 "$next_pl_title"; then
+                        break
+                    fi
+                    
+                    playlist_id="$next_pl_id"
+                    
+                    if ! play_playlist "$next_pl_id" "$next_pl_title" "$audio_only"; then
+                        echo "❌ Failed to play next playlist"
+                        break
+                    fi
+                done
+            fi
+        else
+            # Play video
+            if ! play_video "$selected" "$audio_only"; then
+                exit 1
+            fi
+            
+            # Autoplay for videos (same as regular video flow)
+            if [ "$autoplay" = "true" ]; then
+                local current_video_id
+                current_video_id=$(echo "$selected" | awk '{print $NF}')
+                
+                while true; do
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "✅ Video finished"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    
+                    local related_videos
+                    related_videos=$(get_related_videos "$current_video_id" 5)
+                    
+                    if [ -z "$related_videos" ]; then
+                        echo "❌ No more related videos found"
+                        break
+                    fi
+                    
+                    local next_video
+                    next_video=$(echo "$related_videos" | head -n 1)
+                    
+                    if [ -z "$next_video" ]; then
+                        echo "❌ No more related videos found"
+                        break
+                    fi
+                    
+                    local next_title next_duration next_id next_thumbnail
+                    IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_video"
+                    local next_selected
+                    next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
+                    
+                    if [ -n "$next_thumbnail" ]; then
+                        curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
+                    fi
+                    
+                    if ! countdown_autoplay 3 "$next_title"; then
+                        break
+                    fi
+                    
+                    current_video_id="$next_id"
+                    
+                    if ! play_video "$next_selected" "$audio_only"; then
+                        echo "❌ Failed to play next video"
+                        break
+                    fi
+                done
+            fi
+        fi
+        
+        exit 0
     fi
     
     if [ -z "$search_term" ]; then
