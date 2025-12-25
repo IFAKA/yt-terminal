@@ -90,7 +90,7 @@ announce() {
             say "$message" 2>/dev/null &
         fi
     fi
-    echo "$message"
+    echo "$message" >&2
 }
 
 # Get color scheme based on accessibility mode
@@ -740,6 +740,7 @@ search_youtube() {
 # Download thumbnails
 download_thumbnails() {
     local search_playlists="$1"
+    results=""  # Initialize results variable
     mkdir -p "$CACHE_DIR" || { echo "❌ Failed to create cache directory"; return 1; }
     
     while IFS=$'\t' read -r title duration id thumbnail; do
@@ -1732,35 +1733,9 @@ play_video() {
     # Different behavior for audio-only vs video mode
     if [ "$audio_only" = "true" ]; then
         # AUDIO-ONLY MODE: Run MPV in foreground for full playback controls
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "💡 Options before playing"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo "[Enter] Play  [d] Description/Links  [q] Cancel"
-        echo ""
-        
-        # Wait for user input with timeout
-        if read -t 3 -n 1 preview_key 2>/dev/null; then
-            case "$preview_key" in
-                d|D)
-                    # Show description before playing
-                    show_description_and_links "$video_id" "$title"
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo "Ready to play. Press Enter to continue..."
-                    read -r
-                    ;;
-                q|Q)
-                    echo ""
-                    echo "Cancelled."
-                    return 1
-                    ;;
-            esac
-        fi
-        
-        echo ""
-        echo "Starting playback in 2 seconds..."
-        sleep 2
+        echo "Starting playback..."
+        sleep 1
         
         # Run MPV in FOREGROUND - user has full MPV keyboard controls
         if ! mpv "$url" \
@@ -1781,32 +1756,6 @@ play_video() {
         
     else
         # VIDEO MODE: Run MPV in background, terminal listens for 'd' key
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "💡 Press 'd' for description/links"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "[Enter] Play  [d] Description/Links  [q] Cancel"
-        echo ""
-        
-        # Wait for user input with timeout
-        if read -t 3 -n 1 preview_key 2>/dev/null; then
-            case "$preview_key" in
-                d|D)
-                    # Show description before playing
-                    show_description_and_links "$video_id" "$title"
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo "Ready to play. Press Enter to continue..."
-                    read -r
-                    ;;
-                q|Q)
-                    echo ""
-                    echo "Cancelled."
-                    return 1
-                    ;;
-            esac
-        fi
-        
         echo ""
         echo "Starting playback..."
         sleep 1
