@@ -36,14 +36,14 @@ Navigate results with vim keybindings (`j`/`k`), preview thumbnails, and press E
 ### Quick Install (One-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/yt-terminal/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/IFAKA/yt-terminal/main/install.sh | bash
 ```
 
 ### Manual Install
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/YOUR_USERNAME/yt-terminal.git
+git clone https://github.com/IFAKA/yt-terminal.git
 cd yt-terminal
 ```
 
