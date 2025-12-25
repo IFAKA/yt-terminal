@@ -36,12 +36,6 @@ cleanup() {
     if [ -n "$tmpfile" ] && [ -f "$tmpfile" ]; then
         rm -f "$tmpfile"
     fi
-    if [ -n "$progressfile" ] && [ -f "$progressfile" ]; then
-        rm -f "$progressfile"
-    fi
-    if [ -n "$statusfile" ] && [ -f "$statusfile" ]; then
-        rm -f "$statusfile"
-    fi
     exit "$exit_code"
 }
 
@@ -140,7 +134,23 @@ search_youtube() {
     
     echo "⏳ Fetching videos..."
     
-    # Fetch videos directly and parse them
+    # Create temp file for raw JSON
+    local jsonfile
+    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    
+    # Fetch videos to temp file
+    if ! timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        2>/dev/null > "$jsonfile"; then
+        rm -f "$jsonfile"
+        echo "❌ Search failed or timed out"
+        return 1
+    fi
+    
+    # Parse and display results
     local count=0
     while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
         # Parse video data
@@ -149,13 +159,9 @@ search_youtube() {
         
         count=$((count + 1))
         echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
-    done < <(timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
-        --dump-json \
-        --skip-download \
-        --no-warnings \
-        --quiet \
-        2>/dev/null)
+    done < "$jsonfile"
     
+    rm -f "$jsonfile"
     echo ""
     
     # Check if we got any results
