@@ -465,7 +465,8 @@ search_playlists_youtube() {
     local error_output
     error_output=$(mktemp)
     
-    # Run fetch with spinner
+    # Run fetch with real-time progress
+    echo "Searching playlists..."
     (
         timeout "$TIMEOUT" yt-dlp "https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D" \
             --flat-playlist \
@@ -478,8 +479,30 @@ search_playlists_youtube() {
     ) &
     local fetch_pid=$!
     
-    show_spinner "$fetch_pid" "Fetching playlists from YouTube..."
-    wait "$fetch_pid"
+    # Show progress as playlists are found
+    local count=0
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local temp
+    if [ -t 1 ]; then
+        tput civis 2>/dev/null  # Hide cursor
+        while kill -0 "$fetch_pid" 2>/dev/null; do
+            # Check how many playlists we've found so far
+            if [ -f "$jsonfile" ]; then
+                count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
+            fi
+            temp=${spinstr#?}
+            printf "\r%s Fetching playlists... Found: %d/%d" "${spinstr:0:1}" "$count" "$NUM_RESULTS"
+            spinstr=$temp${spinstr%"$temp"}
+            sleep 0.2
+        done
+        tput cnorm 2>/dev/null  # Show cursor
+        printf "\r"
+    else
+        echo "Fetching playlists from YouTube..."
+        wait "$fetch_pid"
+    fi
+    
+    wait "$fetch_pid" 2>/dev/null
     local fetch_result=$?
     
     if [ "$fetch_result" -ne 0 ]; then
@@ -596,7 +619,8 @@ search_youtube() {
     local error_output
     error_output=$(mktemp)
     
-    # Run fetch with spinner
+    # Run fetch with real-time progress
+    echo "Searching YouTube..."
     (
         timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
             --dump-json \
@@ -607,8 +631,30 @@ search_youtube() {
     ) &
     local fetch_pid=$!
     
-    show_spinner "$fetch_pid" "Fetching videos from YouTube..."
-    wait "$fetch_pid"
+    # Show progress as videos are found
+    local count=0
+    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local temp
+    if [ -t 1 ]; then
+        tput civis 2>/dev/null  # Hide cursor
+        while kill -0 "$fetch_pid" 2>/dev/null; do
+            # Check how many videos we've found so far
+            if [ -f "$jsonfile" ]; then
+                count=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
+            fi
+            temp=${spinstr#?}
+            printf "\r%s Fetching videos... Found: %d/%d" "${spinstr:0:1}" "$count" "$NUM_RESULTS"
+            spinstr=$temp${spinstr%"$temp"}
+            sleep 0.2
+        done
+        tput cnorm 2>/dev/null  # Show cursor
+        printf "\r"
+    else
+        echo "Fetching videos from YouTube..."
+        wait "$fetch_pid"
+    fi
+    
+    wait "$fetch_pid" 2>/dev/null
     local fetch_result=$?
     
     if [ "$fetch_result" -ne 0 ]; then
