@@ -1760,11 +1760,13 @@ play_video() {
         echo "Starting playback..."
         sleep 1
         
-        # Start MPV in BACKGROUND
+        # Start MPV in BACKGROUND with output redirected to prevent terminal pollution
         mpv "$url" \
             --ytdl-format="$format" \
             --volume="$VOLUME" \
-            --window-maximized &
+            --window-maximized \
+            --really-quiet \
+            --msg-level=all=error &
         local mpv_pid=$!
         
         # Show interactive prompt while video is playing
@@ -1784,8 +1786,15 @@ play_video() {
             if read -t 1 -n 1 key 2>/dev/null; then
                 case "$key" in
                     d|D)
+                        # Send pause signal to MPV
+                        kill -STOP "$mpv_pid" 2>/dev/null
+                        
                         # Show description and links
                         show_description_and_links "$video_id" "$title"
+                        
+                        # Resume MPV
+                        kill -CONT "$mpv_pid" 2>/dev/null
+                        
                         # Redisplay prompt
                         echo ""
                         echo "Video still playing... Press 'd' for links, 'q' to stop"
