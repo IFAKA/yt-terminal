@@ -151,7 +151,7 @@ search_youtube() {
             --skip-download \
             --no-warnings \
             --quiet \
-            2>/dev/null | while read -r line; do
+            2>/dev/null | head -n "$NUM_RESULTS" | while read -r line; do
                 # Parse each video as it comes - use TAB as delimiter
                 video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
                 echo "$video_data" >> "$tmpfile"
