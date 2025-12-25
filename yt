@@ -145,11 +145,66 @@ print_box_line() {
     printf "${C_YT_RED}║${C_RESET}%*s${color}%b${C_RESET}%*s${C_YT_RED}║${C_RESET}\n" "$padding" "" "$text" "$right_padding" ""
 }
 
+# Get the default browser on macOS
+get_default_browser() {
+    local default_browser=""
+    
+    # Only works on macOS
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo ""
+        return
+    fi
+    
+    # Try to get default browser from LaunchServices using Python
+    local bundle_id
+    bundle_id=$(python3 -c "
+import plistlib
+import os
+import sys
+
+plist_path = os.path.expanduser('~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist')
+try:
+    with open(plist_path, 'rb') as f:
+        plist = plistlib.load(f)
+    
+    handlers = plist.get('LSHandlers', [])
+    for handler in handlers:
+        if handler.get('LSHandlerURLScheme') == 'https':
+            bundle_id = handler.get('LSHandlerRoleAll', '')
+            if bundle_id:
+                print(bundle_id)
+                break
+except:
+    pass
+" 2>/dev/null)
+    
+    # Map bundle IDs to browser names
+    case "$bundle_id" in
+        *brave*)
+            default_browser="brave"
+            ;;
+        *firefox*)
+            default_browser="firefox"
+            ;;
+        *chrome*|*chromium*)
+            default_browser="chrome"
+            ;;
+        *safari*)
+            default_browser="safari"
+            ;;
+        *edge*)
+            default_browser="edge"
+            ;;
+    esac
+    
+    echo "$default_browser"
+}
+
 # Detect available browsers
 detect_browsers() {
     local available=()
     for browser in brave firefox chrome safari edge; do
-        timeout 3 yt-dlp --cookies-from-browser "$browser" --simulate "https://youtube.com" &>/dev/null && available+=("$browser")
+        timeout 20 yt-dlp --cookies-from-browser "$browser" --simulate "ytsearch1:test" &>/dev/null && available+=("$browser")
     done
     echo "${available[@]}"
 }
@@ -171,7 +226,7 @@ setup_authentication() {
     draw_border bottom 80
     echo ""
     
-    echo "⏳ Detecting browsers (this may take a few seconds)..."
+    echo "⏳ Detecting browsers (this may take up to a minute)..."
     echo ""
     
     # Detect available browsers
@@ -203,34 +258,86 @@ setup_authentication() {
     done
     echo ""
     
-    # Auto-select if only one browser
-    local browser_choice
-    if [ ${#available_browsers[@]} -eq 1 ]; then
-        browser_choice="${available_browsers[0]}"
-        echo "Using ${browser_choice} (only browser detected)"
-    else
-        # Check if Brave is available and use it as default
-        local brave_found=false
+    # Check if default browser is missing and provide helpful message
+    local default_browser
+    default_browser=$(get_default_browser)
+    if [ -n "$default_browser" ]; then
+        local default_found=false
         for browser in "${available_browsers[@]}"; do
-            if [ "$browser" = "brave" ]; then
-                brave_found=true
+            if [ "$browser" = "$default_browser" ]; then
+                default_found=true
                 break
             fi
         done
         
-        if [ "$brave_found" = true ]; then
-            browser_choice="brave"
-            echo "Using ${browser_choice} (default browser)"
+        if [ "$default_found" = false ]; then
+            echo "ℹ️  Note: Your default browser ($default_browser) was not detected."
+            echo "   This usually means:"
+            echo "   • $default_browser is currently running (close it and try again)"
+            echo "   • You're not logged into YouTube in $default_browser"
+            echo "   • $default_browser uses cookie encryption (requires browser to be closed)"
+            echo ""
+        fi
+    fi
+    
+    # Auto-select browser
+    local browser_choice
+    if [ ${#available_browsers[@]} -eq 1 ]; then
+        browser_choice="${available_browsers[0]}"
+        local is_default=false
+        local default_browser
+        default_browser=$(get_default_browser)
+        if [ "$browser_choice" = "$default_browser" ]; then
+            is_default=true
+        fi
+        
+        if [ "$is_default" = true ]; then
+            echo "Using ${browser_choice} (your default browser)"
         else
-            echo -n "Choose browser [1-${#available_browsers[@]}]: "
-            read -r choice
+            echo "Using ${browser_choice} (only browser with accessible cookies)"
+        fi
+    else
+        # Try to use the system's default browser
+        local default_browser
+        default_browser=$(get_default_browser)
+        local default_found=false
+        
+        if [ -n "$default_browser" ]; then
+            for browser in "${available_browsers[@]}"; do
+                if [ "$browser" = "$default_browser" ]; then
+                    default_found=true
+                    break
+                fi
+            done
+        fi
+        
+        if [ "$default_found" = true ]; then
+            browser_choice="$default_browser"
+            echo "Using ${browser_choice} (system default browser)"
+        else
+            # Fall back to Brave if available
+            local brave_found=false
+            for browser in "${available_browsers[@]}"; do
+                if [ "$browser" = "brave" ]; then
+                    brave_found=true
+                    break
+                fi
+            done
             
-            if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
-                echo "❌ Invalid choice"
-                return 1
+            if [ "$brave_found" = true ]; then
+                browser_choice="brave"
+                echo "Using ${browser_choice} (fallback)"
+            else
+                echo -n "Choose browser [1-${#available_browsers[@]}]: "
+                read -r choice
+                
+                if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
+                    echo "❌ Invalid choice"
+                    return 1
+                fi
+                
+                browser_choice="${available_browsers[$((choice-1))]}"
             fi
-            
-            browser_choice="${available_browsers[$((choice-1))]}"
         fi
     fi
     
@@ -240,7 +347,7 @@ setup_authentication() {
     # Test if we can extract cookies
     local test_output
     test_output=$(mktemp)
-    if ! timeout 10 yt-dlp --cookies-from-browser "$browser_choice" --simulate "https://www.youtube.com/" 2>"$test_output" >/dev/null; then
+    if ! timeout 20 yt-dlp --cookies-from-browser "$browser_choice" --simulate "ytsearch1:test" 2>"$test_output" >/dev/null; then
         echo "❌ Failed to extract cookies from ${browser_choice}"
         echo ""
         
