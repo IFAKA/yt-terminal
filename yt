@@ -89,12 +89,16 @@ show_usage() {
     echo "Usage: yt [OPTIONS] <search term>"
     echo ""
     echo "Options:"
-    echo "  -f, --first    Auto-play first search result"
+    echo "  -f, --first       Auto-play first search result"
+    echo "  -a, --audio-only  Play audio only (no video)"
+    echo "  -p, --playlist    Search for playlists instead of videos"
     echo ""
     echo "Examples:"
     echo "  yt vim tutorial              # Search and select interactively"
     echo "  yt -f lofi hip hop           # Auto-play first result"
-    echo "  yt --first elrichmc          # Auto-play first result"
+    echo "  yt -a music                  # Search and play audio only"
+    echo "  yt -p lofi playlists         # Browse playlists"
+    echo "  yt -a -p chill music         # Browse playlists, play audio only"
     echo "  yt <url>                     # Play video from URL"
     echo ""
     echo "Version: $VERSION"
@@ -104,13 +108,24 @@ show_usage() {
 # Play video from URL
 play_url() {
     local url="$1"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "▶ Playing video from URL..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local audio_only="$2"
+    local format
+    
+    if [ "$audio_only" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎵 Playing audio from URL..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        format="bestaudio/best"
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "▶ Playing video from URL..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
+    fi
     echo ""
     
     if ! mpv "$url" \
-        --ytdl-format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best" \
+        --ytdl-format="$format" \
         --volume="$VOLUME" \
         --audio-device=auto; then
         echo "❌ Error playing video"
@@ -123,23 +138,41 @@ play_url() {
 # Search YouTube
 search_youtube() {
     local search_term="$1"
+    local search_playlists="$2"
     
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔍 Searching YouTube for: $search_term"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ "$search_playlists" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📚 Searching YouTube playlists for: $search_term"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔍 Searching YouTube for: $search_term"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
     echo ""
     
     # Create temp file
     tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
-    echo "⏳ Fetching videos..."
+    if [ "$search_playlists" = "true" ]; then
+        echo "⏳ Fetching playlists..."
+    else
+        echo "⏳ Fetching videos..."
+    fi
     
     # Create temp file for raw JSON
     local jsonfile
     jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
     
-    # Fetch videos to temp file
-    if ! timeout "$TIMEOUT" yt-dlp "ytsearch${NUM_RESULTS}:$search_term" \
+    # Fetch videos/playlists to temp file
+    local search_query
+    if [ "$search_playlists" = "true" ]; then
+        search_query="ytsearchplaylist${NUM_RESULTS}:$search_term"
+    else
+        search_query="ytsearch${NUM_RESULTS}:$search_term"
+    fi
+    
+    if ! timeout "$TIMEOUT" yt-dlp "$search_query" \
         --dump-json \
         --skip-download \
         --no-warnings \
@@ -153,12 +186,21 @@ search_youtube() {
     # Parse and display results
     local count=0
     while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
-        # Parse video data
-        video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        if [ "$search_playlists" = "true" ]; then
+            # Parse playlist data
+            video_data=$(echo "$line" | jq -r '"\(.title)\t\(.playlist_count // "?")\t\(.id)\t\(.thumbnail)"')
+        else
+            # Parse video data
+            video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
+        fi
         echo "$video_data" >> "$tmpfile"
         
         count=$((count + 1))
-        echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        if [ "$search_playlists" = "true" ]; then
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        else
+            echo "  ✓ Found ($count/$NUM_RESULTS): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+        fi
     done < "$jsonfile"
     
     rm -f "$jsonfile"
@@ -175,11 +217,17 @@ search_youtube() {
 
 # Download thumbnails
 download_thumbnails() {
+    local search_playlists="$1"
     mkdir -p "$CACHE_DIR" || { echo "❌ Failed to create cache directory"; return 1; }
     
     while IFS=$'\t' read -r title duration id thumbnail; do
-        # Format the result line - add newline after each entry
-        results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
+        if [ "$search_playlists" = "true" ]; then
+            # Format playlist result line - show video count instead of duration
+            results="${results}$(printf "%-80s [%3s vids] %s" "$title" "$duration" "$id")"$'\n'
+        else
+            # Format video result line
+            results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
+        fi
         
         # Download thumbnail in background for preview
         if [ -n "$thumbnail" ]; then
@@ -195,8 +243,12 @@ download_thumbnails() {
     fi
     
     # Count actual non-empty lines
-    videos_count=$(echo "$results" | grep -c '^.')
-    echo "✅ Successfully fetched $videos_count videos!"
+    items_count=$(echo "$results" | grep -c '^.')
+    if [ "$search_playlists" = "true" ]; then
+        echo "✅ Successfully fetched $items_count playlists!"
+    else
+        echo "✅ Successfully fetched $items_count videos!"
+    fi
     echo "📥 Downloading thumbnails..."
     echo ""
     
@@ -208,10 +260,125 @@ download_thumbnails() {
     return 0
 }
 
+# Preview playlist contents (for fzf preview)
+preview_playlist() {
+    local playlist_id="$1"
+    
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📚 Playlist Contents"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "⏳ Loading videos..."
+    echo ""
+    
+    # Fetch playlist videos with a shorter timeout for preview
+    local videos
+    videos=$(timeout 10 yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        2>/dev/null | jq -r '.title // "Unknown"' | head -20)
+    
+    if [ -z "$videos" ]; then
+        echo "❌ Could not load playlist contents"
+        return 1
+    fi
+    
+    local count=0
+    while IFS= read -r video_title; do
+        count=$((count + 1))
+        printf "%2d. %s\n" "$count" "$video_title"
+    done <<< "$videos"
+    
+    # Check if there are more videos
+    local total_count
+    total_count=$(timeout 10 yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
+        --flat-playlist \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        2>/dev/null | wc -l | xargs)
+    
+    if [ "$total_count" -gt 20 ]; then
+        echo ""
+        echo "... and $((total_count - 20)) more videos"
+    fi
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Total: $total_count videos"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Play entire playlist
+play_playlist() {
+    local playlist_id="$1"
+    local playlist_title="$2"
+    local audio_only="$3"
+    local format
+    local url
+    
+    url="https://youtube.com/playlist?list=$playlist_id"
+    
+    # Set format based on audio-only flag
+    if [ "$audio_only" = "true" ]; then
+        format="bestaudio/best"
+    else
+        format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
+    fi
+    
+    clear
+    if [ "$audio_only" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎵 PLAYING PLAYLIST (AUDIO ONLY)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📚 PLAYING PLAYLIST"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+    echo ""
+    echo "Playlist: $playlist_title"
+    echo "URL:      $url"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "MPV Settings:"
+    echo "  - Format: $format"
+    echo "  - Volume: $VOLUME"
+    echo "  - Audio Device: auto"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Starting playlist playback in 2 seconds..."
+    sleep 2
+    
+    # Play playlist with mpv
+    if ! mpv "$url" \
+        --ytdl-format="$format" \
+        --volume="$VOLUME" \
+        --audio-device=auto; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "❌ Playback failed"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✅ Playlist finished"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    return 0
+}
+
 # Select video with fzf or return first result
 select_video() {
     local search_term="$1"
     local auto_first="$2"
+    local search_playlists="$3"
     local videos_count
     local selected
     
@@ -233,27 +400,53 @@ select_video() {
     
     # Clear screen and show results (redirect to stderr to avoid capture)
     clear >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "🎥 YouTube Search: $search_term ($videos_count results)" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    if [ "$search_playlists" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "📚 YouTube Playlists: $search_term ($videos_count results)" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "🎥 YouTube Search: $search_term ($videos_count results)" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    fi
     echo "" >&2
     
-    # Use fzf with vim keybindings and thumbnail preview
-    selected=$(echo "$results" | fzf \
-        --height=90% \
-        --layout=reverse \
-        --border \
-        --prompt="▶ " \
-        --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play | [q] quit" \
-        --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
-        --preview-window=right:40%:wrap \
-        --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
-        --pointer='▶' \
-        --marker='✓' \
-        --bind 'j:down,k:up' \
-        --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
-        --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-        --bind 'q:abort')
+    # Different preview based on search mode
+    if [ "$search_playlists" = "true" ]; then
+        # For playlists, show the playlist contents
+        selected=$(echo "$results" | fzf \
+            --height=90% \
+            --layout=reverse \
+            --border \
+            --prompt="▶ " \
+            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play playlist | [q] quit" \
+            --preview="$0 --preview-playlist \$(echo {} | awk '{print \$NF}')" \
+            --preview-window=right:60%:wrap \
+            --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
+            --pointer='▶' \
+            --marker='✓' \
+            --bind 'j:down,k:up' \
+            --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
+            --bind 'ctrl-f:page-down,ctrl-b:page-up' \
+            --bind 'q:abort')
+    else
+        # For videos, show thumbnail
+        selected=$(echo "$results" | fzf \
+            --height=90% \
+            --layout=reverse \
+            --border \
+            --prompt="▶ " \
+            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play | [q] quit" \
+            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
+            --preview-window=right:40%:wrap \
+            --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
+            --pointer='▶' \
+            --marker='✓' \
+            --bind 'j:down,k:up' \
+            --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
+            --bind 'ctrl-f:page-down,ctrl-b:page-up' \
+            --bind 'q:abort')
+    fi
     
     if [ -z "$selected" ]; then
         echo "" >&2
@@ -270,26 +463,46 @@ select_video() {
 # Play selected video
 play_video() {
     local selected="$1"
-    local video_id title url
+    local audio_only="$2"
+    local video_id title url format
     
     video_id=$(echo "$selected" | awk '{print $NF}')
     title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
     url="https://youtube.com/watch?v=$video_id"
     
+    # Set format based on audio-only flag
+    if [ "$audio_only" = "true" ]; then
+        format="bestaudio/best"
+    else
+        format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
+    fi
+    
     # Show thumbnail before playing
     clear
     if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "▶ VIDEO PREVIEW"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        if [ "$audio_only" = "true" ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🎵 AUDIO PREVIEW"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        else
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "▶ VIDEO PREVIEW"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        fi
         echo ""
         chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
         echo ""
     fi
     
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "▶ PLAYING"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ "$audio_only" = "true" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎵 PLAYING AUDIO"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    else
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "▶ PLAYING"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
     echo ""
     echo "Title:    $title"
     echo "Video ID: $video_id"
@@ -297,7 +510,7 @@ play_video() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "MPV Settings:"
-    echo "  - Format: bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
+    echo "  - Format: $format"
     echo "  - Volume: $VOLUME"
     echo "  - Audio Device: auto"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -307,7 +520,7 @@ play_video() {
     
     # Play with explicit settings
     if ! mpv "$url" \
-        --ytdl-format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best" \
+        --ytdl-format="$format" \
         --volume="$VOLUME" \
         --audio-device=auto; then
         echo ""
@@ -330,14 +543,30 @@ main() {
     # Load configuration
     load_config
     
+    # Handle internal preview mode (called by fzf)
+    if [ "$1" = "--preview-playlist" ]; then
+        preview_playlist "$2"
+        exit 0
+    fi
+    
     # Parse flags
     local auto_first=false
+    local audio_only=false
+    local search_playlists=false
     local search_term=""
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--first)
                 auto_first=true
+                shift
+                ;;
+            -a|--audio-only)
+                audio_only=true
+                shift
+                ;;
+            -p|--playlist)
+                search_playlists=true
                 shift
                 ;;
             -h|--help)
@@ -371,31 +600,42 @@ main() {
     
     # Check if input is a URL
     if [[ "$search_term" =~ ^https?:// ]]; then
-        if ! play_url "$search_term"; then
+        if ! play_url "$search_term" "$audio_only"; then
             exit 1
         fi
         exit 0
     fi
     
     # Search YouTube
-    if ! search_youtube "$search_term"; then
+    if ! search_youtube "$search_term" "$search_playlists"; then
         exit 1
     fi
     
     # Download thumbnails and format results
-    if ! download_thumbnails; then
+    if ! download_thumbnails "$search_playlists"; then
         exit 1
     fi
     
-    # Select video
+    # Select video or playlist
     local selected
-    if ! selected=$(select_video "$search_term" "$auto_first"); then
+    if ! selected=$(select_video "$search_term" "$auto_first" "$search_playlists"); then
         exit 0
     fi
     
-    # Play video
-    if ! play_video "$selected"; then
-        exit 1
+    # If playlist mode, play the entire playlist
+    if [ "$search_playlists" = "true" ]; then
+        local playlist_id playlist_title
+        playlist_id=$(echo "$selected" | awk '{print $NF}')
+        playlist_title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
+        
+        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
+            exit 1
+        fi
+    else
+        # Play single video
+        if ! play_video "$selected" "$audio_only"; then
+            exit 1
+        fi
     fi
     
     exit 0

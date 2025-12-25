@@ -5,8 +5,10 @@ A beautiful, fast terminal-based YouTube browser with video search, thumbnail pr
 ## Features
 
 - Search YouTube directly from your terminal
+- Browse and search YouTube playlists
 - Interactive video selection with `fzf`
 - Thumbnail previews in the terminal (with `chafa`)
+- Audio-only mode for music and podcasts
 - Real-time search progress with spinner
 - Plays videos with `mpv` for the best quality
 - Vim-style keybindings for navigation
@@ -91,6 +93,37 @@ yt -f lofi hip hop          # Instantly plays first result
 yt --first morning music    # Perfect for quick playback
 ```
 
+### Audio-Only Mode
+
+Play only audio (perfect for music, podcasts, or saving bandwidth):
+
+```bash
+yt -a <search term>
+yt --audio-only <search term>
+```
+
+Example:
+```bash
+yt -a lofi hip hop          # Play audio only
+yt -a -f jazz music         # Auto-play first result, audio only
+```
+
+### Play Playlists
+
+Search for playlists and play the entire playlist:
+
+```bash
+yt -p <search term>
+yt --playlist <search term>
+```
+
+Example:
+```bash
+yt -p lofi playlists        # Search and play a playlist
+yt -p chill music           # Search and play a playlist
+yt -a -p study music        # Play playlist in audio-only mode
+```
+
 ### Play Video from URL
 
 ```bash
@@ -100,12 +133,20 @@ yt <youtube-url>
 Example:
 ```bash
 yt https://youtube.com/watch?v=dQw4w9WgXcQ
+yt -a https://youtube.com/watch?v=dQw4w9WgXcQ  # Audio only from URL
 ```
 
 ### Options
 
 - `-f, --first` - Auto-play the first search result (skip interactive selection)
+- `-a, --audio-only` - Play audio only (no video)
+- `-p, --playlist` - Search for playlists instead of videos
 - `-h, --help` - Show help message
+
+Options can be combined:
+```bash
+yt -a -p -f study music     # Search playlists, auto-play first, audio only
+```
 
 ### Keybindings in fzf
 
