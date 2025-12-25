@@ -127,15 +127,21 @@ show_usage() {
     echo "  -f, --first        Auto-play first search result"
     echo "  -a, --audio-only   Play audio only (no video)"
     echo "  -p, --playlist     Search for playlists instead of videos"
+    echo "  --no-autoplay      Disable autoplay (autoplay is ON by default)"
     echo "  --clear-cache      Clear search and playlist cache"
     echo ""
     echo "Examples:"
-    echo "  yt vim tutorial              # Search and select interactively"
-    echo "  yt -f lofi hip hop           # Auto-play first result"
-    echo "  yt -a music                  # Search and play audio only"
-    echo "  yt -p lofi playlists         # Browse playlists"
-    echo "  yt -a -p chill music         # Browse playlists, play audio only"
+    echo "  yt lofi beats                # Search, select, then autoplay related videos"
+    echo "  yt -f lofi hip hop           # Auto-play first result, then autoplay"
+    echo "  yt -a music                  # Audio-only with autoplay"
+    echo "  yt -p lofi playlists         # Browse & autoplay playlists"
+    echo "  yt --no-autoplay vim tutorial # Play once and exit (no autoplay)"
     echo "  yt <url>                     # Play video from URL"
+    echo ""
+    echo "Autoplay:"
+    echo "  Autoplay is ENABLED by default - videos/playlists continue automatically"
+    echo "  After your selection plays, related content plays next (YouTube-style)"
+    echo "  Press Ctrl+C during countdown to stop autoplay"
     echo ""
     echo "Cache:"
     echo "  Search results are cached for $((CACHE_EXPIRY / 60)) minutes"
@@ -677,6 +683,135 @@ select_video() {
     return 0
 }
 
+# Get related videos for a given video ID
+get_related_videos() {
+    local video_id="$1"
+    local num_results="${2:-5}"
+    
+    echo "⏳ Finding related videos..." >&2
+    
+    # Use yt-dlp to get the video page and extract related video IDs
+    # YouTube's related videos are in the page data
+    local related_data
+    related_data=$(timeout "$TIMEOUT" yt-dlp "https://youtube.com/watch?v=$video_id" \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-items 1 \
+        2>/dev/null)
+    
+    if [ -z "$related_data" ]; then
+        echo "❌ Could not fetch related videos" >&2
+        return 1
+    fi
+    
+    # Try to extract channel info to get more videos from same channel
+    local channel_id
+    channel_id=$(echo "$related_data" | jq -r '.channel_id // empty')
+    
+    if [ -n "$channel_id" ]; then
+        # Get latest videos from the same channel
+        timeout "$TIMEOUT" yt-dlp "https://youtube.com/channel/$channel_id/videos" \
+            --flat-playlist \
+            --dump-json \
+            --skip-download \
+            --no-warnings \
+            --quiet \
+            --playlist-end "$num_results" \
+            2>/dev/null | while IFS= read -r line; do
+                local vid_id vid_title vid_duration vid_thumbnail
+                vid_id=$(echo "$line" | jq -r '.id // empty')
+                vid_title=$(echo "$line" | jq -r '.title // "Unknown"')
+                vid_duration=$(echo "$line" | jq -r '.duration_string // "LIVE"')
+                vid_thumbnail=$(echo "$line" | jq -r '.thumbnail // empty')
+                
+                # Skip if it's the same video
+                if [ "$vid_id" != "$video_id" ] && [ -n "$vid_id" ]; then
+                    echo "$vid_title"$'\t'"$vid_duration"$'\t'"$vid_id"$'\t'"$vid_thumbnail"
+                fi
+            done
+        return 0
+    fi
+    
+    return 1
+}
+
+# Get related playlists
+get_related_playlists() {
+    local playlist_id="$1"
+    local num_results="${2:-3}"
+    
+    echo "⏳ Finding related playlists..." >&2
+    
+    # Get playlist info to extract channel or search similar content
+    local playlist_data
+    playlist_data=$(timeout "$TIMEOUT" yt-dlp "https://youtube.com/playlist?list=$playlist_id" \
+        --dump-json \
+        --flat-playlist \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        --playlist-items 1 \
+        2>/dev/null | head -n 1)
+    
+    if [ -z "$playlist_data" ]; then
+        echo "❌ Could not fetch playlist data" >&2
+        return 1
+    fi
+    
+    # Extract channel ID
+    local channel_id
+    channel_id=$(echo "$playlist_data" | jq -r '.channel_id // empty')
+    
+    if [ -n "$channel_id" ]; then
+        # Get playlists from the same channel
+        timeout "$TIMEOUT" yt-dlp "https://youtube.com/channel/$channel_id/playlists" \
+            --flat-playlist \
+            --dump-json \
+            --skip-download \
+            --no-warnings \
+            --quiet \
+            --playlist-end "$num_results" \
+            2>/dev/null | while IFS= read -r line; do
+                local pl_id pl_title pl_thumbnail
+                pl_id=$(echo "$line" | jq -r '.id // empty')
+                pl_title=$(echo "$line" | jq -r '.title // "Unknown"')
+                pl_thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // empty')
+                
+                # Skip if it's the same playlist
+                if [ "$pl_id" != "$playlist_id" ] && [ -n "$pl_id" ]; then
+                    echo "$pl_title"$'\t'"PL"$'\t'"$pl_id"$'\t'"$pl_thumbnail"
+                fi
+            done
+        return 0
+    fi
+    
+    return 1
+}
+
+# Countdown with ability to cancel
+countdown_autoplay() {
+    local seconds="$1"
+    local next_title="$2"
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🔄 AUTOPLAY"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Next: $next_title"
+    echo ""
+    
+    for ((i=seconds; i>0; i--)); do
+        echo -ne "\rStarting in $i seconds... [Press Ctrl+C to stop autoplay] "
+        sleep 1
+    done
+    echo ""
+    
+    return 0
+}
+
 # Play selected video
 play_video() {
     local selected="$1"
@@ -770,6 +905,7 @@ main() {
     local auto_first=false
     local audio_only=false
     local search_playlists=false
+    local autoplay=true  # Autoplay is now DEFAULT
     local search_term=""
     
     while [[ $# -gt 0 ]]; do
@@ -784,6 +920,10 @@ main() {
                 ;;
             -p|--playlist)
                 search_playlists=true
+                shift
+                ;;
+            --no-autoplay)
+                autoplay=false
                 shift
                 ;;
             --clear-cache)
@@ -852,10 +992,113 @@ main() {
         if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
             exit 1
         fi
+        
+        # If autoplay enabled, continue with related playlists
+        if [ "$autoplay" = "true" ]; then
+            while true; do
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "✅ Playlist finished"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                
+                # Get related playlists
+                local related_playlists
+                related_playlists=$(get_related_playlists "$playlist_id" 1)
+                
+                if [ -z "$related_playlists" ]; then
+                    echo "❌ No more related playlists found"
+                    break
+                fi
+                
+                # Get first related playlist
+                local next_playlist
+                next_playlist=$(echo "$related_playlists" | head -n 1)
+                
+                if [ -z "$next_playlist" ]; then
+                    echo "❌ No more related playlists found"
+                    break
+                fi
+                
+                # Extract playlist info
+                local next_pl_title next_pl_id
+                next_pl_title=$(echo "$next_playlist" | cut -f1)
+                next_pl_id=$(echo "$next_playlist" | cut -f3)
+                
+                # Countdown before playing next
+                if ! countdown_autoplay 5 "$next_pl_title"; then
+                    break
+                fi
+                
+                # Update current playlist ID for next iteration
+                playlist_id="$next_pl_id"
+                
+                # Play next playlist
+                if ! play_playlist "$next_pl_id" "$next_pl_title" "$audio_only"; then
+                    echo "❌ Failed to play next playlist"
+                    break
+                fi
+            done
+        fi
     else
         # Play single video
         if ! play_video "$selected" "$audio_only"; then
             exit 1
+        fi
+        
+        # If autoplay enabled, continue with related videos
+        if [ "$autoplay" = "true" ]; then
+            local current_video_id
+            current_video_id=$(echo "$selected" | awk '{print $NF}')
+            
+            while true; do
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "✅ Video finished"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                
+                # Get related videos
+                local related_videos
+                related_videos=$(get_related_videos "$current_video_id" 5)
+                
+                if [ -z "$related_videos" ]; then
+                    echo "❌ No more related videos found"
+                    break
+                fi
+                
+                # Get first related video
+                local next_video
+                next_video=$(echo "$related_videos" | head -n 1)
+                
+                if [ -z "$next_video" ]; then
+                    echo "❌ No more related videos found"
+                    break
+                fi
+                
+                # Format as selected video
+                local next_title next_duration next_id next_thumbnail
+                IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_video"
+                local next_selected
+                next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
+                
+                # Download thumbnail for next video
+                if [ -n "$next_thumbnail" ]; then
+                    curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
+                fi
+                
+                # Countdown before playing next
+                if ! countdown_autoplay 3 "$next_title"; then
+                    break
+                fi
+                
+                # Update current video ID for next iteration
+                current_video_id="$next_id"
+                
+                # Play next video
+                if ! play_video "$next_selected" "$audio_only"; then
+                    echo "❌ Failed to play next video"
+                    break
+                fi
+            done
         fi
     fi
     
