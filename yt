@@ -45,6 +45,12 @@ DEFAULT_PLAYLIST_CACHE_DIR="$HOME/.cache/yt-playlists"
 DEFAULT_CACHE_EXPIRY=3600  # 1 hour in seconds
 CONFIG_DIR="$HOME/.config/yt"
 CONFIG_FILE="$CONFIG_DIR/config"
+FIRST_RUN_FILE="$CONFIG_DIR/.first_run_complete"
+
+# Accessibility settings
+ACCESSIBILITY_MODE=${ACCESSIBILITY_MODE:-false}
+HIGH_CONTRAST_MODE=${HIGH_CONTRAST_MODE:-false}
+SCREEN_READER_MODE=${SCREEN_READER_MODE:-false}
 
 # Load configuration
 load_config() {
@@ -65,6 +71,36 @@ load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
+    fi
+    
+    # Auto-detect screen reader
+    if command -v orca &> /dev/null || command -v espeak &> /dev/null || [ -n "$SCREEN_READER" ]; then
+        SCREEN_READER_MODE=true
+    fi
+}
+
+# Screen reader announcement
+announce() {
+    local message="$1"
+    if [ "$SCREEN_READER_MODE" = "true" ]; then
+        # Try different screen readers
+        if command -v espeak &> /dev/null; then
+            echo "$message" | espeak 2>/dev/null &
+        elif command -v say &> /dev/null; then
+            say "$message" 2>/dev/null &
+        fi
+    fi
+    echo "$message"
+}
+
+# Get color scheme based on accessibility mode
+get_fzf_colors() {
+    if [ "$HIGH_CONTRAST_MODE" = "true" ]; then
+        # High contrast: white on black with bright highlights
+        echo "fg:#ffffff,bg:#000000,hl:#ffff00,fg+:#ffffff,bg+:#000000,hl+:#ffff00,border:#ffffff"
+    else
+        # Default YouTube-like colors
+        echo "fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000"
     fi
 }
 
@@ -221,10 +257,80 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Detect platform
+detect_platform() {
+    local os
+    os=$(uname -s)
+    
+    case "$os" in
+        Linux*)
+            if grep -qi microsoft /proc/version 2>/dev/null; then
+                echo "WSL"
+            else
+                echo "Linux"
+            fi
+            ;;
+        Darwin*)
+            echo "macOS"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "Windows"
+            ;;
+        *)
+            echo "Unknown"
+            ;;
+    esac
+}
+
+# Get package manager
+get_package_manager() {
+    local platform="$1"
+    
+    case "$platform" in
+        macOS)
+            if command -v brew &> /dev/null; then
+                echo "brew"
+            else
+                echo "none"
+            fi
+            ;;
+        Linux|WSL)
+            if command -v apt &> /dev/null; then
+                echo "apt"
+            elif command -v dnf &> /dev/null; then
+                echo "dnf"
+            elif command -v pacman &> /dev/null; then
+                echo "pacman"
+            elif command -v zypper &> /dev/null; then
+                echo "zypper"
+            else
+                echo "none"
+            fi
+            ;;
+        Windows)
+            if command -v choco &> /dev/null; then
+                echo "choco"
+            elif command -v scoop &> /dev/null; then
+                echo "scoop"
+            else
+                echo "none"
+            fi
+            ;;
+        *)
+            echo "none"
+            ;;
+    esac
+}
+
 # Check dependencies
 check_dependencies() {
     local missing_deps=()
     local optional_deps=()
+    local platform
+    local pkg_manager
+    
+    platform=$(detect_platform)
+    pkg_manager=$(get_package_manager "$platform")
     
     # Required dependencies
     command -v yt-dlp &> /dev/null || missing_deps+=("yt-dlp")
@@ -246,11 +352,50 @@ check_dependencies() {
             echo "  • $dep"
         done
         echo ""
-        echo "Installation command (macOS):"
-        echo "  brew install ${missing_deps[*]}"
+        echo "Detected platform: $platform"
         echo ""
-        echo "Installation command (Linux/Debian):"
-        echo "  sudo apt install ${missing_deps[*]}"
+        
+        # Platform-specific installation instructions
+        case "$pkg_manager" in
+            brew)
+                echo "Installation command (Homebrew):"
+                echo "  brew install ${missing_deps[*]}"
+                ;;
+            apt)
+                echo "Installation command (Debian/Ubuntu):"
+                echo "  sudo apt update && sudo apt install ${missing_deps[*]}"
+                
+                if [ "$platform" = "WSL" ]; then
+                    echo ""
+                    echo "WSL Note: For video playback, you may need:"
+                    echo "  • Windows mpv installed, or"
+                    echo "  • X server (VcXsrv/Xming) for Linux GUI apps"
+                fi
+                ;;
+            dnf)
+                echo "Installation command (Fedora/RHEL):"
+                echo "  sudo dnf install ${missing_deps[*]}"
+                ;;
+            pacman)
+                echo "Installation command (Arch Linux):"
+                echo "  sudo pacman -S ${missing_deps[*]}"
+                ;;
+            choco)
+                echo "Installation command (Chocolatey):"
+                echo "  choco install ${missing_deps[*]}"
+                ;;
+            scoop)
+                echo "Installation command (Scoop):"
+                echo "  scoop install ${missing_deps[*]}"
+                ;;
+            *)
+                echo "Please install manually. Visit:"
+                echo "  • yt-dlp: https://github.com/yt-dlp/yt-dlp#installation"
+                echo "  • mpv: https://mpv.io/installation/"
+                echo "  • fzf: https://github.com/junegunn/fzf#installation"
+                echo "  • jq: https://stedolan.github.io/jq/download/"
+                ;;
+        esac
         echo ""
         return 1
     fi
@@ -303,6 +448,11 @@ show_usage() {
     echo "  --watch-later      View watch later queue"
     echo "  --liked            Browse liked videos"
     echo ""
+    echo "Accessibility Options:"
+    echo "  --high-contrast    Enable high contrast mode"
+    echo "  --screen-reader    Enable screen reader announcements"
+    echo "  --no-emojis        Disable emoji icons (cleaner for some readers)"
+    echo ""
     echo "Other Options:"
     echo "  --clear-cache      Clear search and playlist cache"
     echo "  -h, --help         Show this help message"
@@ -318,6 +468,11 @@ show_usage() {
     echo ""
     echo "  yt --subs                    # Latest from subscriptions"
     echo "  yt --home -a                 # Recommendations in audio-only mode"
+    echo ""
+    echo "While Playing:"
+    echo "  Video mode: Press 'd' to view description/links (video keeps playing)"
+    echo "  Audio mode: Full MPV controls (pause, skip, volume, etc.)"
+    echo "  Links can be opened in browser, copied, or selected multiple at once"
     echo ""
     echo "Autoplay:"
     echo "  Autoplay is ENABLED by default - videos/playlists continue automatically"
@@ -824,41 +979,61 @@ select_video() {
     fi
     echo "" >&2
     
+    # Get appropriate color scheme
+    local fzf_colors
+    fzf_colors=$(get_fzf_colors)
+    
+    # Accessibility-friendly header
+    local nav_header
+    if [ "$SCREEN_READER_MODE" = "true" ]; then
+        nav_header="Navigate: j down, k up, Ctrl-d page down, Ctrl-u page up, Enter select, q quit"
+    else
+        nav_header="[j/k] navigate | [Ctrl-d/u] page | [Enter] select | [q] quit"
+    fi
+    
     # Different preview based on search mode
     if [ "$search_playlists" = "true" ]; then
+        announce "Playlist selection menu ready. $videos_count playlists found."
+        
         # For playlist mode, show playlist contents
         selected=$(echo "$results" | fzf \
             --height=90% \
             --layout=reverse \
             --border \
-            --prompt="📚 " \
-            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play playlist | [q] quit" \
+            --prompt="📚 Playlist: " \
+            --header="$nav_header" \
             --preview="$0 --preview-playlist \$(echo {} | awk '{print \$NF}')" \
             --preview-window=right:60%:wrap \
-            --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
+            --color="$fzf_colors" \
             --pointer='▶' \
             --marker='✓' \
             --bind 'j:down,k:up' \
             --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
             --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-            --bind 'q:abort')
+            --bind 'q:abort' \
+            --bind 'enter:accept' \
+            --tabstop=4)
     else
+        announce "Video selection menu ready. $videos_count videos found."
+        
         # For videos, show thumbnail
         selected=$(echo "$results" | fzf \
             --height=90% \
             --layout=reverse \
             --border \
-            --prompt="▶ " \
-            --header="[j/k] navigate | [Ctrl-d/u] page | [Enter] play | [q] quit" \
+            --prompt="▶ Video: " \
+            --header="$nav_header" \
             --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Downloading thumbnail...'; fi" \
             --preview-window=right:40%:wrap \
-            --color='fg:#ffffff,bg:#000000,hl:#ff0000,fg+:#ffffff,bg+:#333333,hl+:#ff0000' \
+            --color="$fzf_colors" \
             --pointer='▶' \
             --marker='✓' \
             --bind 'j:down,k:up' \
             --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
             --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-            --bind 'q:abort')
+            --bind 'q:abort' \
+            --bind 'enter:accept' \
+            --tabstop=4)
     fi
     
     if [ -z "$selected" ]; then
@@ -925,6 +1100,159 @@ get_related_videos() {
     fi
     
     return 1
+}
+
+# Fetch video description and metadata
+get_video_info() {
+    local video_id="$1"
+    
+    timeout "$TIMEOUT" yt-dlp "https://youtube.com/watch?v=$video_id" \
+        --dump-json \
+        --skip-download \
+        --no-warnings \
+        --quiet \
+        2>/dev/null
+}
+
+# Extract links from description with context
+extract_links_from_description() {
+    local description="$1"
+    local tmpfile=$(mktemp)
+    
+    # Extract URLs and try to get context (text before the URL)
+    echo "$description" | grep -oE '.{0,40}https?://[^ ]+' | while IFS= read -r line; do
+        # Extract the URL
+        local url=$(echo "$line" | grep -oE 'https?://[^ ]+')
+        # Extract context (text before URL, cleaned up)
+        local context=$(echo "$line" | sed "s|$url||" | xargs)
+        
+        # If no context, try to infer from URL
+        if [ -z "$context" ] || [ ${#context} -lt 3 ]; then
+            context=$(echo "$url" | sed -E 's|https?://(www\.)?||' | cut -d'/' -f1)
+        fi
+        
+        echo "$url"$'\t'"$context"
+    done | awk '!seen[$1]++' > "$tmpfile"  # Remove duplicate URLs
+    
+    cat "$tmpfile"
+    rm -f "$tmpfile"
+}
+
+# Show description and links in interactive selector
+show_description_and_links() {
+    local video_id="$1"
+    local video_title="$2"
+    
+    echo "" >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "📄 Fetching description and links..." >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    
+    # Fetch video info
+    local video_info
+    video_info=$(get_video_info "$video_id")
+    
+    if [ -z "$video_info" ]; then
+        echo "❌ Could not fetch video information" >&2
+        return 1
+    fi
+    
+    # Extract description
+    local description
+    description=$(echo "$video_info" | jq -r '.description // "No description available"')
+    
+    # Extract links with context
+    local links_file=$(mktemp)
+    extract_links_from_description "$description" > "$links_file"
+    
+    local link_count
+    link_count=$(wc -l < "$links_file" | xargs)
+    
+    if [ "$link_count" -eq 0 ]; then
+        echo "" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "ℹ️  No links found in description" >&2
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "" >&2
+        echo "Description:" >&2
+        echo "$description" | head -20 >&2
+        echo "" >&2
+        rm -f "$links_file"
+        read -p "Press Enter to continue..." >&2
+        return 0
+    fi
+    
+    # Format links for fzf
+    local formatted_links=$(mktemp)
+    while IFS=$'\t' read -r url context; do
+        printf "%-60s  %s\n" "$url" "$context"
+    done < "$links_file" > "$formatted_links"
+    
+    # Show interactive selector
+    clear >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "📄 Video Links & Description" >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "Video: $video_title" >&2
+    echo "Links found: $link_count" >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "" >&2
+    
+    # Create a description preview file
+    local desc_file=$(mktemp)
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" > "$desc_file"
+    echo "Full Description:" >> "$desc_file"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> "$desc_file"
+    echo "" >> "$desc_file"
+    echo "$description" >> "$desc_file"
+    
+    # Get color scheme
+    local fzf_colors
+    fzf_colors=$(get_fzf_colors)
+    
+    # Run fzf with multi-select
+    local selected
+    selected=$(cat "$formatted_links" | fzf \
+        --multi \
+        --height=90% \
+        --layout=reverse \
+        --border \
+        --prompt="🔗 " \
+        --header="[Tab] Multi-select  [Enter] Open  [c] Copy  [a] All  [q] Cancel" \
+        --preview="cat $desc_file" \
+        --preview-window=down:50%:wrap \
+        --bind 'tab:toggle+down' \
+        --bind 'c:execute-silent(echo {} | awk "{print \$1}" | pbcopy)+abort' \
+        --bind "a:select-all+accept" \
+        --color="$fzf_colors" \
+        --pointer='▶' \
+        --marker='✓')
+    
+    # Clean up temp files
+    rm -f "$links_file" "$formatted_links" "$desc_file"
+    
+    if [ -z "$selected" ]; then
+        return 0
+    fi
+    
+    # Open selected links
+    echo "" >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    echo "🌐 Opening links..." >&2
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    
+    echo "$selected" | while IFS= read -r line; do
+        local url=$(echo "$line" | awk '{print $1}')
+        echo "  Opening: $url" >&2
+        open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "  ⚠️  Could not open: $url" >&2
+        sleep 0.3  # Small delay between opening multiple links
+    done
+    
+    echo "" >&2
+    echo "✅ Done!" >&2
+    sleep 1
+    
+    return 0
 }
 
 # Get related playlists
@@ -1167,6 +1495,156 @@ fetch_next_from_feed() {
         done
 }
 
+# First-run tutorial and onboarding
+show_first_run_tutorial() {
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "👋 Welcome to yt - YouTube Terminal Browser!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "This is your first time using yt. Let's take a quick tour!"
+    echo ""
+    echo "Press Enter to continue (or Ctrl+C to skip)..."
+    read -r
+    
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📚 Tutorial - Basic Search"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Search for videos by typing:"
+    echo "  yt <search term>"
+    echo ""
+    echo "Example:"
+    echo "  yt lofi hip hop"
+    echo "  yt vim tutorial"
+    echo ""
+    echo "Navigation (in the selection menu):"
+    echo "  j/k     - Move down/up"
+    echo "  Ctrl+d  - Page down"
+    echo "  Ctrl+u  - Page up"
+    echo "  Enter   - Play selected video"
+    echo "  q/Esc   - Quit"
+    echo ""
+    echo "Press Enter to continue..."
+    read -r
+    
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🎯 Tutorial - Quick Features"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Useful flags:"
+    echo "  -f, --first       Auto-play first result (no selection)"
+    echo "  -a, --audio-only  Play audio only (save bandwidth)"
+    echo "  -p, --playlist    Search for playlists instead"
+    echo "  --no-autoplay     Disable autoplay feature"
+    echo ""
+    echo "Combine flags:"
+    echo "  yt -af lofi music      # Audio-only, first result"
+    echo "  yt -p study beats      # Search playlists"
+    echo ""
+    echo "Play from URL:"
+    echo "  yt https://youtube.com/watch?v=..."
+    echo ""
+    echo "Press Enter to continue..."
+    read -r
+    
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "👤 Tutorial - Personal Account Features"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Access your YouTube account:"
+    echo "  --home         Your personalized feed"
+    echo "  --subs         Latest from subscriptions"
+    echo "  --playlists    Your saved playlists"
+    echo "  --watch-later  Watch later queue"
+    echo "  --liked        Your liked videos"
+    echo ""
+    echo "Example:"
+    echo "  yt --subs -a    # Subscriptions, audio-only"
+    echo ""
+    echo "Note: First use will prompt browser selection (one-time setup)"
+    echo ""
+    echo "Press Enter to continue..."
+    read -r
+    
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✨ Tutorial - Pro Tips"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "1. Autoplay is ON by default"
+    echo "   - Videos continue automatically (like YouTube)"
+    echo "   - Press Ctrl+C during countdown to stop"
+    echo ""
+    echo "2. Smart caching"
+    echo "   - Searches cached for 1 hour (instant results)"
+    echo "   - Clear cache: yt --clear-cache"
+    echo ""
+    echo "3. Thumbnail previews"
+    echo "   - Install 'chafa' for terminal thumbnails"
+    echo "   - brew install chafa"
+    echo ""
+    echo "4. Get help anytime"
+    echo "   - yt --help"
+    echo ""
+    echo "Press Enter to continue..."
+    read -r
+    
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🎬 Tutorial Complete!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Try it now with a sample search!"
+    echo ""
+    echo "Suggested searches:"
+    echo "  1. yt lofi hip hop"
+    echo "  2. yt -a relaxing music"
+    echo "  3. yt -p chill beats"
+    echo "  4. yt --home"
+    echo ""
+    echo -n "Would you like to try a sample search now? [y/N]: "
+    read -r response
+    
+    # Mark tutorial as complete
+    touch "$FIRST_RUN_FILE"
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        clear
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎵 Sample Search: lofi hip hop"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        # Override search term for tutorial
+        TUTORIAL_SEARCH="lofi hip hop"
+        return 0
+    else
+        clear
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✅ Setup Complete!"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Start using yt anytime by typing:"
+        echo "  yt <search term>"
+        echo ""
+        echo "Run 'yt --help' to see all options."
+        echo ""
+        exit 0
+    fi
+}
+
+# Check if first run
+check_first_run() {
+    if [ ! -f "$FIRST_RUN_FILE" ]; then
+        return 0  # First run
+    fi
+    return 1  # Not first run
+}
+
 # Countdown with ability to cancel
 countdown_autoplay() {
     local seconds="$1"
@@ -1244,25 +1722,151 @@ play_video() {
     echo "  - Audio Device: auto"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "Starting playback in 2 seconds..."
-    sleep 2
     
-    # Play with explicit settings
-    if ! mpv "$url" \
-        --ytdl-format="$format" \
-        --volume="$VOLUME" \
-        --window-maximized; then
+    # Different behavior for audio-only vs video mode
+    if [ "$audio_only" = "true" ]; then
+        # AUDIO-ONLY MODE: Run MPV in foreground for full playback controls
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "💡 Options before playing"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "[Enter] Play  [d] Description/Links  [q] Cancel"
+        echo ""
+        
+        # Wait for user input with timeout
+        if read -t 3 -n 1 preview_key 2>/dev/null; then
+            case "$preview_key" in
+                d|D)
+                    # Show description before playing
+                    show_description_and_links "$video_id" "$title"
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Ready to play. Press Enter to continue..."
+                    read -r
+                    ;;
+                q|Q)
+                    echo ""
+                    echo "Cancelled."
+                    return 1
+                    ;;
+            esac
+        fi
+        
+        echo ""
+        echo "Starting playback in 2 seconds..."
+        sleep 2
+        
+        # Run MPV in FOREGROUND - user has full MPV keyboard controls
+        if ! mpv "$url" \
+            --ytdl-format="$format" \
+            --volume="$VOLUME" \
+            --window-maximized; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Playback failed"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            return 1
+        fi
+        
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ Playback failed"
+        echo "✅ Playback finished"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        return 1
+        
+    else
+        # VIDEO MODE: Run MPV in background, terminal listens for 'd' key
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "💡 Press 'd' for description/links"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "[Enter] Play  [d] Description/Links  [q] Cancel"
+        echo ""
+        
+        # Wait for user input with timeout
+        if read -t 3 -n 1 preview_key 2>/dev/null; then
+            case "$preview_key" in
+                d|D)
+                    # Show description before playing
+                    show_description_and_links "$video_id" "$title"
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Ready to play. Press Enter to continue..."
+                    read -r
+                    ;;
+                q|Q)
+                    echo ""
+                    echo "Cancelled."
+                    return 1
+                    ;;
+            esac
+        fi
+        
+        echo ""
+        echo "Starting playback..."
+        sleep 1
+        
+        # Start MPV in BACKGROUND
+        mpv "$url" \
+            --ytdl-format="$format" \
+            --volume="$VOLUME" \
+            --window-maximized &
+        local mpv_pid=$!
+        
+        # Show interactive prompt while video is playing
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎬 Video playing... (PID: $mpv_pid)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Controls:"
+        echo "  [d] Show description & links"
+        echo "  [q] Stop playback"
+        echo ""
+        
+        # Listen for keypresses while MPV is running
+        while kill -0 "$mpv_pid" 2>/dev/null; do
+            # Read single character with timeout
+            if read -t 1 -n 1 key 2>/dev/null; then
+                case "$key" in
+                    d|D)
+                        # Show description and links
+                        show_description_and_links "$video_id" "$title"
+                        # Redisplay prompt
+                        echo ""
+                        echo "Video still playing... Press 'd' for links, 'q' to stop"
+                        ;;
+                    q|Q)
+                        # Kill MPV
+                        echo ""
+                        echo "Stopping playback..."
+                        kill "$mpv_pid" 2>/dev/null
+                        wait "$mpv_pid" 2>/dev/null
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        echo "⏹️  Playback stopped"
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        return 1
+                        ;;
+                esac
+            fi
+        done
+        
+        # Wait for MPV to finish
+        wait "$mpv_pid" 2>/dev/null
+        local mpv_exit=$?
+        
+        if [ "$mpv_exit" -ne 0 ]; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Playback failed"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            return 1
+        fi
+        
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✅ Playback finished"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     fi
-    
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✅ Playback finished"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     return 0
 }
@@ -1324,6 +1928,18 @@ main() {
                 personal_mode="liked"
                 shift
                 ;;
+            --high-contrast)
+                HIGH_CONTRAST_MODE=true
+                shift
+                ;;
+            --screen-reader)
+                SCREEN_READER_MODE=true
+                shift
+                ;;
+            --no-emojis)
+                export NO_EMOJIS=true
+                shift
+                ;;
             --clear-cache)
                 clear_cache
                 exit 0
@@ -1380,10 +1996,25 @@ main() {
     # Trim leading/trailing whitespace
     search_term=$(echo "$search_term" | xargs)
     
-    # Show usage if no search term (before checking dependencies)
+    # Check for first run before showing usage
     if [ -z "$search_term" ] && [ -z "$personal_mode" ]; then
-        show_usage
-        exit 1
+        if check_first_run; then
+            # First run - show tutorial
+            if ! check_dependencies; then
+                exit 1
+            fi
+            show_first_run_tutorial
+            # If tutorial set TUTORIAL_SEARCH, use it
+            if [ -n "$TUTORIAL_SEARCH" ]; then
+                search_term="$TUTORIAL_SEARCH"
+            else
+                exit 0
+            fi
+        else
+            # Not first run - show usage
+            show_usage
+            exit 1
+        fi
     fi
     
     # Check dependencies (always run before usage to give helpful error messages)

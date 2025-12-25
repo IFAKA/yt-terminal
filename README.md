@@ -21,12 +21,30 @@ A beautiful, fast terminal-based YouTube browser with video search, thumbnail pr
 
 ## Preview
 
-Search for videos with live progress updates:
-```
+![yt-terminal demo](https://via.placeholder.com/800x450.gif?text=Demo+GIF+Coming+Soon)
+
+<!-- 
+To add your own demo GIF:
+1. Record your terminal with asciinema: asciinema rec demo.cast
+2. Convert to GIF: https://github.com/asciinema/agg
+3. Replace the placeholder above with: ![yt-terminal demo](./assets/demo.gif)
+-->
+
+**Quick Demo:**
+```bash
+# Search for videos with live progress updates
 yt minecraft tutorial
+
+# Navigate with vim keybindings (j/k), preview thumbnails, press Enter to play!
 ```
 
-Navigate results with vim keybindings (`j`/`k`), preview thumbnails, and press Enter to play!
+**Key Features in Action:**
+- 🔍 Real-time search with progress spinner
+- 🖼️ Thumbnail previews in terminal (with chafa)
+- ⌨️ Vim-style navigation (j/k keys)
+- 🎵 Audio-only mode for music
+- 📚 Playlist support with preview
+- 🏠 Personal account integration
 
 ## Requirements
 
@@ -152,6 +170,17 @@ yt -a https://youtube.com/watch?v=dQw4w9WgXcQ  # Audio only from URL
 - `-p, --playlist` - Search for playlists instead of videos
 - `--no-autoplay` - Disable autoplay (play once and exit)
 
+### Accessibility Options
+
+- `--high-contrast` - Enable high contrast mode for better visibility
+- `--screen-reader` - Enable screen reader announcements
+- `--no-emojis` - Disable emoji icons for cleaner text-only display
+
+Example:
+```bash
+yt --high-contrast --screen-reader lofi music
+```
+
 ### Personal Account
 
 Access your personal YouTube content:
@@ -261,37 +290,177 @@ This will remove:
 
 The script uses sensible defaults but you can modify the `yt` script to customize:
 
-- Video quality (default: 1080p max)
-- Number of search results (default: 10)
-- mpv settings
-- fzf color scheme
+Configuration file location: `~/.config/yt/config`
+
+Example configuration:
+```bash
+# Performance
+NUM_RESULTS=15                # Number of search results (default: 10)
+MAX_QUALITY=1080              # Max video quality (default: 1080p)
+TIMEOUT=120                   # Search timeout in seconds (default: 90)
+CACHE_EXPIRY=7200            # Cache expiry in seconds (default: 3600/1hr)
+
+# Playback
+VOLUME=100                    # Default volume (default: 100)
+
+# Accessibility
+HIGH_CONTRAST_MODE=true       # Enable high contrast (default: false)
+SCREEN_READER_MODE=true       # Enable screen reader (default: false)
+```
+
+You can also modify the `yt` script directly to customize:
+- mpv settings (line ~1250)
+- fzf color scheme (get_fzf_colors function)
+
+## FAQ (Frequently Asked Questions)
+
+### General Questions
+
+**Q: Is this free?**  
+A: Yes! yt-terminal is completely free and open source (MIT License).
+
+**Q: Does this download videos?**  
+A: No, it streams videos directly using mpv. No files are saved to disk (except cached thumbnails and search results).
+
+**Q: Do I need a YouTube account?**  
+A: No for basic searches. Yes for personal features (`--home`, `--subs`, `--playlists`, etc.).
+
+**Q: Is this safe? Does it require my password?**  
+A: Yes, it's safe. It uses browser cookies (no passwords needed). Your credentials never leave your machine.
+
+**Q: What's the difference between this and youtube-dl?**  
+A: yt-terminal provides an interactive UI with fzf, thumbnail previews, vim keybindings, and autoplay features.
+
+### Usage Questions
+
+**Q: How do I play audio only?**  
+A: Use the `-a` or `--audio-only` flag:
+```bash
+yt -a lofi hip hop
+```
+
+**Q: Can I disable autoplay?**  
+A: Yes, use `--no-autoplay`:
+```bash
+yt --no-autoplay relaxing music
+```
+
+**Q: How do I search for playlists?**  
+A: Use the `-p` or `--playlist` flag:
+```bash
+yt -p study music
+```
+
+**Q: Can I combine flags?**  
+A: Yes! Flags can be combined in any order:
+```bash
+yt -apf chill beats  # Audio-only, playlist search, auto-play first result
+```
+
+**Q: How long are searches cached?**  
+A: Search results are cached for 1 hour. Clear with `yt --clear-cache`.
+
+### Technical Questions
+
+**Q: Which browsers are supported for authentication?**  
+A: Brave, Firefox, Chrome, Safari, and Edge.
+
+**Q: Does this work on Windows?**  
+A: Yes, via WSL (Windows Subsystem for Linux). Native Windows support with Git Bash/MSYS2.
+
+**Q: Can I use this on a headless server?**  
+A: Yes, audio-only mode works great on servers. Video playback requires a display.
+
+**Q: How do I update yt?**  
+A: Run the installer again or pull latest changes:
+```bash
+cd yt-terminal && git pull && ./install.sh
+```
+
+**Q: Does this support 4K video?**  
+A: Yes, but default is 1080p max. Modify `MAX_QUALITY` in `~/.config/yt/config`.
+
+### Accessibility Questions
+
+**Q: Does this work with screen readers?**  
+A: Yes! Use `--screen-reader` flag for screen reader announcements.
+
+**Q: Can I use high contrast mode?**  
+A: Yes! Use `--high-contrast` flag for better visibility.
+
+**Q: Are there keyboard-only controls?**  
+A: Yes, all navigation is keyboard-based (j/k, Ctrl-d/u, Enter, q).
 
 ## Troubleshooting
 
-**No videos showing in search results**
+### No videos showing in search results
 
 Make sure you have the latest version of the script. The issue with only 1 video showing has been fixed.
 
-**Thumbnails not showing**
+### Thumbnails not showing
 
 Install `chafa` for terminal image support:
 ```bash
-brew install chafa
+brew install chafa  # macOS
+sudo apt install chafa  # Linux
 ```
 
-**Command not found**
+### Command not found
 
 Make sure `~/.local/bin` is in your PATH:
 ```bash
 echo $PATH | grep ".local/bin"
 ```
 
-**yt-dlp errors**
+If not in PATH, add it:
+```bash
+# For zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# For bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### yt-dlp errors
 
 Update yt-dlp to the latest version:
 ```bash
-brew upgrade yt-dlp
+brew upgrade yt-dlp  # macOS
+pip install --upgrade yt-dlp  # pip
+sudo apt update && sudo apt upgrade yt-dlp  # Linux
 ```
+
+### Authentication issues
+
+If personal features (`--home`, `--subs`) fail:
+1. Make sure you're logged into YouTube in your browser
+2. Close your browser completely
+3. Run the authentication setup again by deleting the config:
+   ```bash
+   rm -rf ~/.config/yt/config
+   ```
+4. Try the feature again
+
+### WSL video playback issues
+
+On Windows WSL, you may need:
+- Install Windows mpv, OR
+- Install X server (VcXsrv or Xming) for Linux GUI apps
+
+For audio-only mode on WSL, no additional setup needed.
+
+### Performance issues
+
+If searches are slow:
+- Check your internet connection
+- Update yt-dlp: `brew upgrade yt-dlp` or `pip install --upgrade yt-dlp`
+- Clear cache: `yt --clear-cache`
+- Reduce number of results in `~/.config/yt/config`:
+  ```bash
+  echo "NUM_RESULTS=5" >> ~/.config/yt/config
+  ```
 
 ## License
 
