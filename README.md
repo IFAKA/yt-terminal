@@ -2,6 +2,11 @@
 
 🚀 **A beautiful, blazing-fast terminal YouTube browser** - Search, browse, and play videos instantly from your terminal with stunning visuals and zero distractions.
 
+![search](https://github.com/user-attachments/assets/bef138d9-e929-4d55-8ad9-ee5170d5628c)
+![first](https://github.com/user-attachments/assets/1565c7c3-4121-4df6-8e94-c89e792720aa)
+![playlist](https://github.com/user-attachments/assets/4844783a-e879-4ac1-a523-fb8721ac86b6)
+![audio](https://github.com/user-attachments/assets/e1beda58-1b42-488a-954f-f5cbd381177a)
+
 ## ✨ Why You'll Love It
 
 **⚡ Lightning Fast**
