@@ -9,24 +9,18 @@ VERSION="1.0.0"
 show_spinner() {
     local pid=$1
     local message=$2
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local temp
-    
-    # Check if we have a terminal (for CI/non-interactive environments)
+    local spinstr='-\|/'
+    local i=0
+
     if [ -t 1 ]; then
-        tput civis 2>/dev/null  # Hide cursor
-        
+        tput civis 2>/dev/null
         while kill -0 "$pid" 2>/dev/null; do
-            temp=${spinstr#?}
-            printf "\r  ${C_CYAN}${spinstr:0:1}${C_RESET} ${C_WHITE}%s${C_RESET}" "$message"
-            spinstr=$temp${spinstr%"$temp"}
+            printf "\r%s %c" "$message" "${spinstr:i++%4:1}"
             sleep 0.1
         done
-        
-        tput cnorm 2>/dev/null  # Show cursor
-        printf "\r"
+        tput cnorm 2>/dev/null
+        printf "\r%s  \n" "$message"
     else
-        # Non-interactive mode: just show the message once
         echo "$message"
         wait "$pid"
     fi
@@ -113,15 +107,20 @@ C_GRAY='\033[38;5;244m'
 # YouTube brand colors
 C_YT_RED='\033[38;5;196m'
 
-# Get color scheme based on accessibility mode
+# Minimal color scheme
 get_fzf_colors() {
     if [ "$HIGH_CONTRAST_MODE" = "true" ]; then
-        # High contrast: white on black with bright highlights
-        echo "fg:#ffffff,bg:#000000,hl:#ffff00,fg+:#ffffff,bg+:#000000,hl+:#ffff00,border:#ffffff,prompt:#ffff00,pointer:#ffff00,marker:#00ff00,info:#00ffff,header:#ffffff"
+        echo "fg:#ffffff,bg:#000000,hl:#ffffff,fg+:#ffffff,bg+:#1a1a1a,hl+:#ffffff,pointer:#ffffff,header:#888888,info:#888888"
     else
-        # Modern YouTube-inspired theme with gradients
-        echo "fg:#e0e0e0,bg:#0a0a0a,hl:#ff0000,fg+:#ffffff,bg+:#1a1a1a,hl+:#ff3333,border:#ff0000,prompt:#ff0000,pointer:#ff0000,marker:#00ff00,info:#00d9ff,header:#ff6b6b,gutter:#0a0a0a,scrollbar:#ff0000"
+        echo "fg:#888888,bg:-1,hl:#ffffff,fg+:#ffffff,bg+:-1,hl+:#ffffff,pointer:#ffffff,header:#555555,info:#555555"
     fi
+}
+
+# Minimal fzf options
+get_fzf_base_opts() {
+    local colors
+    colors=$(get_fzf_colors)
+    echo "--layout=reverse --no-border --pointer=▸ --marker=+ --no-separator --no-scrollbar --color=$colors --bind=j:down,k:up --bind=ctrl-d:half-page-down,ctrl-u:half-page-up --bind=ctrl-f:page-down,ctrl-b:page-up"
 }
 
 # Simplified box drawing functions
@@ -227,7 +226,7 @@ setup_authentication() {
     draw_border bottom 80
     echo ""
     
-    echo "⏳ Detecting browsers (this may take up to a minute)..."
+    echo "Detecting browsers (this may take up to a minute)..."
     echo ""
     
     # Detect available browsers
@@ -235,7 +234,7 @@ setup_authentication() {
     IFS=' ' read -r -a available_browsers <<< "$(detect_browsers)"
     
     if [ ${#available_browsers[@]} -eq 0 ]; then
-        echo "❌ No supported browsers detected."
+        echo "error:No supported browsers detected."
         echo ""
         echo "Supported browsers: Brave, Firefox, Chrome, Safari, Edge"
         echo ""
@@ -272,7 +271,7 @@ setup_authentication() {
         done
         
         if [ "$default_found" = false ]; then
-            echo "ℹ️  Note: Your default browser ($default_browser) was not detected."
+            echo "Note: Your default browser ($default_browser) was not detected."
             echo "   This usually means:"
             echo "   • $default_browser is currently running (close it and try again)"
             echo "   • You're not logged into YouTube in $default_browser"
@@ -333,7 +332,7 @@ setup_authentication() {
                 read -r choice
                 
                 if [ -z "$choice" ] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_browsers[@]} ]; then
-                    echo "❌ Invalid choice"
+                    echo "error:Invalid choice"
                     return 1
                 fi
                 
@@ -343,13 +342,13 @@ setup_authentication() {
     fi
     
     echo ""
-    echo "⏳ Testing authentication with ${browser_choice}..."
+    echo "Testing authentication with ${browser_choice}..."
     
     # Test if we can extract cookies
     local test_output
     test_output=$(mktemp)
     if ! timeout 20 yt-dlp --cookies-from-browser "$browser_choice" --simulate "ytsearch1:test" 2>"$test_output" >/dev/null; then
-        echo "❌ Failed to extract cookies from ${browser_choice}"
+        echo "error:Failed to extract cookies from ${browser_choice}"
         echo ""
         
         # Show error if helpful
@@ -371,14 +370,14 @@ setup_authentication() {
     
     # Export cookies to file to avoid repeated password prompts
     echo ""
-    echo "⏳ Exporting cookies to file (you may be asked for your password once)..."
+    echo "Exporting cookies to file (you may be asked for your password once)..."
     
     # Remove old cookies file
     rm -f "$COOKIES_FILE"
     
     # Export cookies from browser
     if timeout 30 yt-dlp --cookies-from-browser "$browser_choice" --cookies "$COOKIES_FILE" --simulate "ytsearch1:test" &>/dev/null; then
-        echo "✓ Cookies exported successfully"
+        echo "Cookies exported successfully"
         
         # Save to config
         {
@@ -388,7 +387,7 @@ setup_authentication() {
             echo "BROWSER=\"$browser_choice\""
         } >> "$CONFIG_FILE"
     else
-        echo "⚠️  Cookie export failed - will use browser cookies directly"
+        echo "warning:Cookie export failed - will use browser cookies directly"
         echo "   (You may be asked for your password on each use)"
         
         # Save to config without cookie file
@@ -404,9 +403,9 @@ setup_authentication() {
     load_config
     
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✅ Authentication configured!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "done:Authentication configured!"
+    :
     echo ""
     echo "Using: ${browser_choice} cookies"
     echo "Saved to: $CONFIG_FILE"
@@ -604,9 +603,9 @@ check_dependencies() {
     command -v chafa &> /dev/null || optional_deps+=("chafa")
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ Missing required dependencies"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "error:Missing required dependencies"
+        :
         echo ""
         echo "Please install the following:"
         for dep in "${missing_deps[@]}"; do
@@ -663,9 +662,9 @@ check_dependencies() {
     
     # Test if yt-dlp is working
     if ! timeout 10 yt-dlp --version &>/dev/null; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ yt-dlp is not working properly"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "error:yt-dlp is not working properly"
+        :
         echo ""
         echo "Try updating yt-dlp:"
         if command -v brew &> /dev/null; then
@@ -682,7 +681,7 @@ check_dependencies() {
     fi
     
     if [ ${#optional_deps[@]} -ne 0 ]; then
-        echo "ℹ️  Optional: Install 'chafa' for thumbnail previews"
+        echo "Optional: Install 'chafa' for thumbnail previews"
         echo "   brew install chafa"
         echo ""
     fi
@@ -756,9 +755,9 @@ show_usage() {
 
 # Clear cache
 clear_cache() {
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🗑️  Clearing cache..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "clearing cache..."
+    :
     echo ""
     
     local deleted=0
@@ -768,7 +767,7 @@ clear_cache() {
         count=$(find "$SEARCH_CACHE_DIR" -type f | wc -l | xargs)
         rm -rf "${SEARCH_CACHE_DIR:?}"/*
         deleted=$((deleted + count))
-        echo "✓ Cleared search cache ($count files)"
+        echo "Cleared search cache ($count files)"
     fi
     
     if [ -d "$PLAYLIST_CACHE_DIR" ]; then
@@ -776,7 +775,7 @@ clear_cache() {
         count=$(find "$PLAYLIST_CACHE_DIR" -type f | wc -l | xargs)
         rm -rf "${PLAYLIST_CACHE_DIR:?}"/*
         deleted=$((deleted + count))
-        echo "✓ Cleared playlist cache ($count files)"
+        echo "Cleared playlist cache ($count files)"
     fi
     
     if [ -d "$CACHE_DIR" ]; then
@@ -784,7 +783,7 @@ clear_cache() {
         count=$(find "$CACHE_DIR" -name "*.jpg" | wc -l | xargs)
         rm -rf "${CACHE_DIR:?}"/*.jpg
         deleted=$((deleted + count))
-        echo "✓ Cleared thumbnail cache ($count files)"
+        echo "Cleared thumbnail cache ($count files)"
     fi
     
     if [ -d "$VIDEO_INFO_CACHE_DIR" ]; then
@@ -792,13 +791,13 @@ clear_cache() {
         count=$(find "$VIDEO_INFO_CACHE_DIR" -type f | wc -l | xargs)
         rm -rf "${VIDEO_INFO_CACHE_DIR:?}"/*
         deleted=$((deleted + count))
-        echo "✓ Cleared video info cache ($count files)"
+        echo "Cleared video info cache ($count files)"
     fi
     
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✅ Cleared $deleted cached items"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "done:Cleared $deleted cached items"
+    :
 }
 
 # Extract video ID from various YouTube URL formats
@@ -833,14 +832,14 @@ play_url() {
     video_id=$(extract_video_id "$url")
 
     if [ -z "$video_id" ]; then
-        echo "❌ Could not extract video ID from URL"
+        echo "error:Could not extract video ID from URL"
         echo "   Supported formats: youtube.com/watch?v=..., youtu.be/..., youtube.com/embed/..."
         return 1
     fi
 
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo "📥 Fetching video info..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
 
     # Fetch title using yt-dlp
     local title
@@ -865,36 +864,27 @@ search_youtube() {
     local auto_first="$3"
     
     # Set search parameters based on type
-    local content_type content_icon search_url
+    local content_type search_url
     if [ "$search_playlists" = "true" ]; then
         content_type="playlist"
-        content_icon="📚"
         # URL-encode the search term
         local encoded_term
         encoded_term=$(echo "$search_term" | sed 's/ /+/g')
         search_url="https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D"
     else
         content_type="video"
-        content_icon="🔍"
         local num_to_fetch="$NUM_RESULTS"
         [ "$auto_first" = "true" ] && num_to_fetch=1
         search_url="ytsearch${num_to_fetch}:$search_term"
     fi
-    
-    if [ "$search_playlists" = "true" ]; then
-        clear
-        echo ""
-        echo -e "${C_MAGENTA}${content_icon}  Searching playlists:${C_RESET} ${C_BOLD}${C_YELLOW}$search_term${C_RESET}"
-        echo ""
-    else
-        clear
-        echo ""
-        echo -e "${C_YT_RED}${content_icon}  Searching:${C_RESET} ${C_BOLD}${C_YELLOW}$search_term${C_RESET}"
-        echo ""
-    fi
+
+    clear
+    echo ""
+    echo "searching: $search_term"
+    echo ""
     
     # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    tmpfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
     
     # Determine how many results to fetch
     local num_to_fetch="$NUM_RESULTS"
@@ -908,23 +898,14 @@ search_youtube() {
     local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
     
     if is_cache_valid "$cache_file"; then
-        echo -e "  ${C_CYAN}📦${C_RESET} ${C_WHITE}Loading from cache...${C_RESET}"
+        echo "(cached)"
         cp "$cache_file" "$tmpfile"
-        
-        # Display cached results
-        local count=0
-        while IFS=$'\t' read -r title _ id _; do
-            count=$((count + 1))
-            echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$title" | cut -c1-60)${C_RESET}..."
-            [ "$auto_first" = "true" ] && break
-        done < "$tmpfile"
-        echo ""
         return 0
     fi
     
     # Create temp file for raw JSON
     local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    jsonfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
     
     # Fetch content
     local error_output
@@ -957,38 +938,25 @@ search_youtube() {
     
     # Show progress with count
     local progress_count=0
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local temp
+    local spinstr='-\|/'
+    local i=0
     if [ -t 1 ]; then
-        tput civis 2>/dev/null  # Hide cursor
+        tput civis 2>/dev/null
         while kill -0 "$fetch_pid" 2>/dev/null; do
             if [ -f "$jsonfile" ]; then
-                # Count lines starting with { and sanitize the result
                 local count_raw
                 count_raw=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
-                # Extract only the first number from the output (handle multi-line output)
                 progress_count=$(echo "$count_raw" | head -1 | tr -cd '0-9' | grep -o '^[0-9]*' || echo "0")
-                # Ensure we have a valid number
                 [ -z "$progress_count" ] && progress_count=0
-                # Cap at expected number (defensive check)
                 [ "$progress_count" -gt "$num_to_fetch" ] && progress_count="$num_to_fetch"
             fi
-            temp=${spinstr#?}
-            local percent=$((progress_count * 100 / num_to_fetch))
-            local bar_width=30
-            local filled=$((percent * bar_width / 100))
-            local bar
-            bar=$(printf "%${filled}s" "" | tr ' ' '█')
-            local empty
-            empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
-            printf "\r  ${C_CYAN}${spinstr:0:1}${C_RESET} ${C_WHITE}Fetching %ss...${C_RESET} ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET} ${C_YELLOW}%d${C_RESET}/${C_WHITE}%d${C_RESET} ${C_DIM}(%d%%)${C_RESET}" "$content_type" "$progress_count" "$num_to_fetch" "$percent"
-            spinstr=$temp${spinstr%"$temp"}
+            printf "\r%c fetching %d/%d" "${spinstr:i++%4:1}" "$progress_count" "$num_to_fetch"
             sleep 0.2
         done
-        tput cnorm 2>/dev/null  # Show cursor
-        printf "\r"
+        tput cnorm 2>/dev/null
+        printf "\r                              \n"
     else
-        echo "Fetching ${content_type}s from YouTube..."
+        echo "fetching..."
         wait "$fetch_pid"
     fi
     
@@ -997,7 +965,7 @@ search_youtube() {
     
     if [ "$fetch_result" -ne 0 ]; then
         rm -f "$jsonfile"
-        echo "❌ Search failed or timed out"
+        echo "error:Search failed or timed out"
         [ -s "$error_output" ] && echo "" && echo "Error details:" && head -3 "$error_output" | sed 's/^/  /' && echo ""
         echo "Troubleshooting steps:"
         echo "  1. Update yt-dlp (brew upgrade yt-dlp or pip install --upgrade yt-dlp)"
@@ -1021,13 +989,13 @@ search_youtube() {
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$playlist_title" | cut -c1-60)${C_RESET}..."
+                echo "  $count/$num_to_fetch: $(echo "$playlist_title" | cut -c1-50)..."
             fi
         else
             video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo -e "  ${C_GREEN}✓${C_RESET} Found ${C_YELLOW}($count/$num_to_fetch)${C_RESET}: ${C_WHITE}$(echo "$line" | jq -r '.title' | cut -c1-60)${C_RESET}..."
+            echo "  $count/$num_to_fetch: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
         fi
     done < "$jsonfile"
     
@@ -1035,7 +1003,7 @@ search_youtube() {
     echo ""
     
     if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ No ${content_type}s found!"
+        echo "error:No ${content_type}s found!"
         return 1
     fi
     
@@ -1047,7 +1015,7 @@ search_youtube() {
 download_thumbnails() {
     local search_playlists="$1"
     results=""  # Initialize results variable
-    mkdir -p "$CACHE_DIR" || { echo "❌ Failed to create cache directory"; return 1; }
+    mkdir -p "$CACHE_DIR" || { echo "error:Failed to create cache directory"; return 1; }
     
     while IFS=$'\t' read -r title duration id thumbnail; do
         if [ "$search_playlists" = "true" ]; then
@@ -1065,28 +1033,24 @@ download_thumbnails() {
     done < "$tmpfile"
     
     if [ -z "$results" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ No results found!"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "error:No results found!"
+        :
         return 1
     fi
     
     # Count actual non-empty lines
     items_count=$(echo "$results" | grep -c '^.')
-    if [ "$search_playlists" = "true" ]; then
-        echo -e "  ${C_GREEN}✓${C_RESET} Successfully fetched ${C_BOLD}${C_YELLOW}$items_count${C_RESET} ${C_WHITE}playlists${C_RESET}"
-    else
-        echo -e "  ${C_GREEN}✓${C_RESET} Successfully fetched ${C_BOLD}${C_YELLOW}$items_count${C_RESET} ${C_WHITE}videos${C_RESET}"
-    fi
-    
-    # Wait for thumbnails with spinner
+    echo "fetched $items_count items"
+
+    # Wait for thumbnails
     (sleep 2) &
     local sleep_pid=$!
-    show_spinner "$sleep_pid" "Downloading thumbnails..."
+    show_spinner "$sleep_pid" "loading thumbnails"
     wait "$sleep_pid"
-    
-    echo -e "  ${C_GREEN}✓${C_RESET} ${C_WHITE}Ready!${C_RESET}"
-    sleep 0.5
+
+    echo "ready"
+    sleep 0.3
     
     return 0
 }
@@ -1095,16 +1059,15 @@ download_thumbnails() {
 preview_playlist() {
     local playlist_id="$1"
     
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📚 Playlist Contents"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "playlist contents"
     echo ""
-    
+
     # Check cache first
     local cache_file="$PLAYLIST_CACHE_DIR/$playlist_id.json"
-    
+
     if is_cache_valid "$cache_file"; then
-        echo "📦 Cached playlist"
+        echo "(cached)"
         echo ""
         
         # Read from cache
@@ -1131,13 +1094,13 @@ preview_playlist() {
         fi
         
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
         echo "Total: $total_count videos in playlist"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
         return 0
     fi
     
-    echo "⏳ Loading videos..."
+    echo "Loading videos..."
     echo ""
     
     # Fetch first 20 videos from playlist
@@ -1152,7 +1115,7 @@ preview_playlist() {
         2>/dev/null)
     
     if [ -z "$videos" ]; then
-        echo "❌ Could not load playlist contents"
+        echo "error:Could not load playlist contents"
         return 1
     fi
     
@@ -1186,9 +1149,9 @@ preview_playlist() {
     fi
     
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo "Total: $total_count videos in playlist"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     
     # Cache the full result
     echo "$videos" > "$cache_file"
@@ -1217,13 +1180,12 @@ play_playlist() {
     clear
     echo ""
     if [ "$audio_only" = "true" ]; then
-        echo -e "${C_BOLD}${C_CYAN}🎵  Playing Playlist (Audio)${C_RESET}"
+        echo "playing playlist (audio)"
     else
-        echo -e "${C_BOLD}${C_MAGENTA}📚  Playing Playlist${C_RESET}"
+        echo "playing playlist"
     fi
-    echo -e "${C_YELLOW}$playlist_title${C_RESET}"
+    echo "$playlist_title"
     echo ""
-    echo -e "${C_GRAY}Starting in 2 seconds...${C_RESET}"
     sleep 2
 
     # Play playlist with mpv
@@ -1234,16 +1196,16 @@ play_playlist() {
         --autofit=1920x1080 \
         $sub_opts; then
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "❌ Playback failed"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "error:Playback failed"
+        :
         return 1
     fi
     
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✅ Playlist finished"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "done:Playlist finished"
+    :
     
     return 0
 }
@@ -1263,10 +1225,10 @@ select_video() {
     if [ "$auto_first" = "true" ]; then
         selected=$(echo "$results" | head -n 1)
         if [ -z "$selected" ]; then
-            echo "❌ No results found" >&2
+            echo "error:No results found" >&2
             return 1
         fi
-        echo "🎯 Auto-playing first result..." >&2
+        echo "Auto-playing first result..." >&2
         echo "" >&2
         echo "$selected"
         return 0
@@ -1276,22 +1238,18 @@ select_video() {
     clear >&2
     echo "" >&2
     if [ "$search_playlists" = "true" ]; then
-        echo -e "${C_PURPLE}📚  Playlists:${C_RESET} ${C_BOLD}$search_term${C_RESET} ${C_GRAY}($videos_count results)${C_RESET}" >&2
+        echo "$search_term  ($videos_count playlists)" >&2
     else
-        echo -e "${C_YT_RED}🎥  Videos:${C_RESET} ${C_BOLD}$search_term${C_RESET} ${C_GRAY}($videos_count results)${C_RESET}" >&2
+        echo "$search_term  ($videos_count videos)" >&2
     fi
     echo "" >&2
-    
-    # Get appropriate color scheme
-    local fzf_colors
-    fzf_colors=$(get_fzf_colors)
-    
-    # Accessibility-friendly header
+
+    # Header
     local nav_header
     if [ "$SCREEN_READER_MODE" = "true" ]; then
-        nav_header="Navigate: j down, k up, Ctrl-d page down, Ctrl-u page up, Enter select, q quit"
+        nav_header="j:down k:up ctrl-d:page-down ctrl-u:page-up enter:select q:quit"
     else
-        nav_header="[j/k] Navigate  •  [Enter] Play  •  [q] Quit"
+        nav_header="j/k:nav  enter:play  q:quit"
     fi
     
     # Different preview based on search mode
@@ -1299,63 +1257,32 @@ select_video() {
         announce "Playlist selection menu ready. $videos_count playlists found."
         
         # For playlist mode, show playlist contents
-        selected=$(echo "$results" | fzf \
+        selected=$(echo "$results" | fzf $(get_fzf_base_opts) \
             --height=95% \
-            --layout=reverse \
-            --border=rounded \
-            --border-label=" 📚 Playlists " \
-            --border-label-pos=3 \
-            --prompt="▶ " \
+            --prompt="" \
             --header="$nav_header" \
             --preview="$0 --preview-playlist \$(echo {} | awk '{print \$NF}')" \
-            --preview-window=right:60%:wrap:border-rounded \
-            --preview-label=" Preview " \
-            --color="$fzf_colors" \
-            --pointer='❯' \
-            --marker='✓' \
-            --separator='─' \
-            --scrollbar='│' \
+            --preview-window=right:60%:wrap \
             --info=inline \
-            --bind 'j:down,k:up' \
-            --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
-            --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-            --bind 'q:abort' \
-            --bind 'enter:accept' \
+            --bind=enter:accept \
             --tabstop=4)
     else
         announce "Video selection menu ready. $videos_count videos found."
-        
+
         # For videos, show thumbnail
-        selected=$(echo "$results" | fzf \
+        selected=$(echo "$results" | fzf $(get_fzf_base_opts) \
             --height=95% \
-            --layout=reverse \
-            --border=rounded \
-            --border-label=" 🎬 Videos " \
-            --border-label-pos=3 \
-            --prompt="▶ " \
+            --prompt="" \
             --header="$nav_header" \
-            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo '⏳ Loading...'; fi" \
-            --preview-window=right:40%:wrap:border-rounded \
-            --preview-label=" Preview " \
-            --color="$fzf_colors" \
-            --pointer='❯' \
-            --marker='✓' \
-            --separator='─' \
-            --scrollbar='│' \
+            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo 'loading'; fi" \
+            --preview-window=right:40%:wrap \
             --info=inline \
-            --bind 'j:down,k:up' \
-            --bind 'ctrl-d:half-page-down,ctrl-u:half-page-up' \
-            --bind 'ctrl-f:page-down,ctrl-b:page-up' \
-            --bind 'q:abort' \
-            --bind 'enter:accept' \
+            --bind=enter:accept \
             --tabstop=4)
     fi
-    
+
     if [ -z "$selected" ]; then
-        echo "" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-        echo "❌ Cancelled" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        echo "cancelled" >&2
         return 1
     fi
     
@@ -1368,7 +1295,7 @@ get_related_videos() {
     local video_id="$1"
     local num_results="${2:-5}"
     
-    echo "⏳ Finding related videos..." >&2
+    echo "Finding related videos..." >&2
     
     # Use yt-dlp to get the video page and extract related video IDs
     # YouTube's related videos are in the page data
@@ -1382,7 +1309,7 @@ get_related_videos() {
         2>/dev/null)
     
     if [ -z "$related_data" ]; then
-        echo "❌ Could not fetch related videos" >&2
+        echo "error:Could not fetch related videos" >&2
         return 1
     fi
     
@@ -1478,16 +1405,16 @@ show_description_and_links() {
     local video_title="$2"
     
     echo "" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    : >&2
     echo "📄 Fetching description and links..." >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+    : >&2
     
     # Fetch video info
     local video_info
     video_info=$(get_video_info "$video_id")
     
     if [ -z "$video_info" ]; then
-        echo "❌ Could not fetch video information" >&2
+        echo "error:Could not fetch video information" >&2
         return 1
     fi
     
@@ -1505,9 +1432,9 @@ show_description_and_links() {
     
     if [ "$link_count" -eq 0 ]; then
         echo "" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-        echo "ℹ️  No links found in description" >&2
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+        : >&2
+        echo "No links found in description" >&2
+        : >&2
         echo "" >&2
         echo "Description:" >&2
         echo "$description" | head -20 >&2
@@ -1527,71 +1454,46 @@ show_description_and_links() {
     # Show interactive selector
     clear >&2
     echo "" >&2
-    echo -e "${C_BOLD}${C_CYAN}🔗  Links in Video${C_RESET}" >&2
-    echo -e "${C_YELLOW}$video_title${C_RESET}" >&2
-    echo -e "${C_GRAY}$link_count links found${C_RESET}" >&2
+    echo "$video_title" >&2
+    echo "$link_count links" >&2
     echo "" >&2
-    
+
     # Create a description preview file
     local desc_file
     desc_file=$(mktemp)
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" > "$desc_file"
-    echo "Full Description:" >> "$desc_file"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >> "$desc_file"
+    : > "$desc_file"
+    echo "description:" >> "$desc_file"
     echo "" >> "$desc_file"
     echo "$description" >> "$desc_file"
-    
-    # Get color scheme
-    local fzf_colors
-    fzf_colors=$(get_fzf_colors)
-    
+
     # Run fzf with multi-select
     local selected
-    selected=$(cat "$formatted_links" | fzf \
+    selected=$(cat "$formatted_links" | fzf $(get_fzf_base_opts) \
         --multi \
         --height=95% \
-        --layout=reverse \
-        --border=rounded \
-        --border-label=" 🔗 Links " \
-        --border-label-pos=3 \
-        --prompt="▶ " \
-        --header="[Tab] Select  •  [Enter] Open  •  [c] Copy  •  [q] Cancel" \
+        --prompt="" \
+        --header="tab:select  enter:open  c:copy  q:quit" \
         --preview="cat $desc_file" \
-        --preview-window=down:50%:wrap:border-rounded \
-        --preview-label=" Description " \
-        --bind 'tab:toggle+down' \
-        --bind 'c:execute-silent(echo {} | awk "{print \$1}" | pbcopy)+abort' \
-        --bind "a:select-all+accept" \
-        --color="$fzf_colors" \
-        --pointer='❯' \
-        --marker='✓' \
-        --separator='─' \
-        --scrollbar='│' \
+        --preview-window=down:50%:wrap \
+        --bind=tab:toggle+down \
+        --bind='c:execute-silent(echo {} | awk "{print \$1}" | pbcopy)+abort' \
+        --bind=a:select-all+accept \
         --info=inline)
-    
+
     # Clean up temp files
     rm -f "$links_file" "$formatted_links" "$desc_file"
-    
+
     if [ -z "$selected" ]; then
         return 0
     fi
-    
+
     # Open selected links
-    echo "" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "🌐 Opening links..." >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    
     echo "$selected" | while IFS= read -r line; do
         local url
         url=$(echo "$line" | awk '{print $1}')
-        echo "  Opening: $url" >&2
-        open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "  ⚠️  Could not open: $url" >&2
-        sleep 0.3  # Small delay between opening multiple links
+        open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || echo "could not open: $url" >&2
+        sleep 0.3
     done
-    
-    echo "" >&2
-    echo "✅ Done!" >&2
     sleep 1
     
     return 0
@@ -1602,7 +1504,7 @@ get_related_playlists() {
     local playlist_id="$1"
     local num_results="${2:-3}"
     
-    echo "⏳ Finding related playlists..." >&2
+    echo "Finding related playlists..." >&2
     
     # Get playlist info to extract channel or search similar content
     local playlist_data
@@ -1616,7 +1518,7 @@ get_related_playlists() {
         2>/dev/null | head -n 1)
     
     if [ -z "$playlist_data" ]; then
-        echo "❌ Could not fetch playlist data" >&2
+        echo "error:Could not fetch playlist data" >&2
         return 1
     fi
     
@@ -1660,55 +1562,48 @@ fetch_personal_feed() {
     case "$feed_type" in
         home)
             feed_url="https://www.youtube.com/feed/recommended"
-            feed_icon="🏠"
-            feed_desc="personalized recommendations"
-            error_msg="No recommendations found!"
+            feed_desc="recommendations"
+            error_msg="no recommendations found"
             is_playlist=false
             ;;
         subs)
             feed_url="https://www.youtube.com/feed/subscriptions"
-            feed_icon="📺"
-            feed_desc="subscriptions feed"
-            error_msg="No subscription videos found!"
+            feed_desc="subscriptions"
+            error_msg="no subscription videos found"
             is_playlist=false
             ;;
         playlists)
             feed_url="https://www.youtube.com/feed/library"
-            feed_icon="📚"
-            feed_desc="your playlists"
-            error_msg="No playlists found!"
+            feed_desc="playlists"
+            error_msg="no playlists found"
             is_playlist=true
             ;;
         watch-later)
             feed_url="https://www.youtube.com/playlist?list=WL"
-            feed_icon="🕐"
             feed_desc="watch later"
-            error_msg="Watch later is empty!"
+            error_msg="watch later is empty"
             is_playlist=false
             ;;
         liked)
             feed_url="https://www.youtube.com/playlist?list=LL"
-            feed_icon="👍"
             feed_desc="liked videos"
-            error_msg="No liked videos found!"
+            error_msg="no liked videos found"
             is_playlist=false
             ;;
         *)
-            echo "❌ Unknown feed type: $feed_type"
+            echo "error: unknown feed type: $feed_type"
             return 1
             ;;
     esac
-    
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "$feed_icon Fetching $feed_desc..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    echo "loading $feed_desc..."
     echo ""
     
     local auth_args
     auth_args=$(get_auth_args) || return 1
     
     # Create temp file
-    tmpfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    tmpfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
     
     # Determine how many results to fetch
     local num_to_fetch="$NUM_RESULTS"
@@ -1716,11 +1611,11 @@ fetch_personal_feed() {
         num_to_fetch=1
     fi
     
-    echo "⏳ Loading your $feed_desc..."
+    echo "Loading your $feed_desc..."
     
     # Fetch feed content
     local jsonfile
-    jsonfile=$(mktemp) || { echo "❌ Failed to create temp file"; return 1; }
+    jsonfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
     
     # shellcheck disable=SC2086
     local error_file
@@ -1734,7 +1629,7 @@ fetch_personal_feed() {
         --playlist-end "$num_to_fetch" \
         2>"$error_file" > "$jsonfile"; then
         rm -f "$jsonfile"
-        echo "❌ Failed to fetch $feed_desc"
+        echo "error:Failed to fetch $feed_desc"
         echo ""
         
         # Show error details if available
@@ -1767,7 +1662,7 @@ fetch_personal_feed() {
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$playlist_title" | cut -c1-60)..."
+                echo "  $count/$num_to_fetch: $(echo "$playlist_title" | cut -c1-50)..."
             fi
         else
             # Parse as video
@@ -1777,14 +1672,14 @@ fetch_personal_feed() {
             if [ -n "$video_data" ]; then
                 echo "$video_data" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  ✓ Found ($count/$num_to_fetch): $(echo "$line" | jq -r '.title' | cut -c1-60)..."
+                echo "  $count/$num_to_fetch: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
             fi
         fi
     done < "$jsonfile"
     
     # Debug: show what we got
     if [ ! -s "$jsonfile" ]; then
-        echo "⚠️  Debug: No data received from yt-dlp"
+        echo "warning:Debug: No data received from yt-dlp"
         echo ""
         echo "This usually means:"
         echo "  1. Browser cookies are not accessible"
@@ -1805,7 +1700,7 @@ fetch_personal_feed() {
     echo ""
     
     if [ ! -s "$tmpfile" ] || [ "$count" -eq 0 ]; then
-        echo "❌ $error_msg"
+        echo "error:$error_msg"
         echo ""
         echo "Debug info:"
         echo "  - Browser: ${BROWSER:-not set}"
@@ -1820,9 +1715,9 @@ fetch_personal_feed() {
     fi
     
     if [ "$is_playlist" = true ]; then
-        echo "✅ Successfully fetched $count playlists!"
+        echo "done:Successfully fetched $count playlists!"
     else
-        echo "✅ Successfully fetched $count videos!"
+        echo "done:Successfully fetched $count videos!"
     fi
     echo ""
     
@@ -1918,9 +1813,9 @@ play_selected_content() {
 # First-run tutorial and onboarding
 show_first_run_tutorial() {
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo "👋 Welcome to yt - YouTube Terminal Browser!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo ""
     echo "This is your first time using yt. Let's take a quick tour!"
     echo ""
@@ -1928,9 +1823,9 @@ show_first_run_tutorial() {
     read -r
     
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📚 Tutorial - Basic Search"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "tutorial - basic search"
+    :
     echo ""
     echo "Search for videos by typing:"
     echo "  yt <search term>"
@@ -1950,9 +1845,9 @@ show_first_run_tutorial() {
     read -r
     
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🎯 Tutorial - Quick Features"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "Tutorial - Quick Features"
+    :
     echo ""
     echo "Useful flags:"
     echo "  -f, --first       Auto-play first result (no selection)"
@@ -1971,9 +1866,9 @@ show_first_run_tutorial() {
     read -r
     
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo "👤 Tutorial - Personal Account Features"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
     echo ""
     echo "Access your YouTube account:"
     echo "  --home         Your personalized feed"
@@ -1991,9 +1886,9 @@ show_first_run_tutorial() {
     read -r
     
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "✨ Tutorial - Pro Tips"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "tutorial - pro tips"
+    :
     echo ""
     echo "1. Autoplay is ON by default"
     echo "   - Videos continue automatically (like YouTube)"
@@ -2014,9 +1909,9 @@ show_first_run_tutorial() {
     read -r
     
     clear
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🎬 Tutorial Complete!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    :
+    echo "tutorial complete"
+    :
     echo ""
     echo "Try it now with a sample search!"
     echo ""
@@ -2034,9 +1929,9 @@ show_first_run_tutorial() {
     
     if [[ "$response" =~ ^[Yy]$ ]]; then
         clear
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🎵 Sample Search: lofi hip hop"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "sample search: lofi hip hop"
+        :
         echo ""
         
         # Override search term for tutorial
@@ -2044,9 +1939,9 @@ show_first_run_tutorial() {
         return 0
     else
         clear
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ Setup Complete!"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "done:Setup Complete!"
+        :
         echo ""
         echo "Start using yt anytime by typing:"
         echo "  yt <search term>"
@@ -2069,23 +1964,17 @@ check_first_run() {
 countdown_autoplay() {
     local seconds="$1"
     local next_title="$2"
-    
+
     echo ""
-    echo -e "${C_BOLD}${C_GREEN}▶  Next:${C_RESET} ${C_YELLOW}$next_title${C_RESET}"
+    echo "next: $next_title"
     echo ""
-    
+
     for ((i=seconds; i>0; i--)); do
-        local bar_width=50
-        local filled=$((bar_width - (i * bar_width / seconds)))
-        local bar
-        bar=$(printf "%${filled}s" "" | tr ' ' '█')
-        local empty
-        empty=$(printf "%$((bar_width - filled))s" "" | tr ' ' '░')
-        echo -ne "\r  ${C_GREEN}${bar}${C_GRAY}${empty}${C_RESET}  ${C_BOLD}${i}s${C_RESET}  ${C_DIM}(Ctrl+C to skip)${C_RESET}  "
+        echo -ne "\r  ${i}s  (ctrl+c to skip)  "
         sleep 1
     done
-    echo -e "\n"
-    
+    echo ""
+
     return 0
 }
 
@@ -2101,13 +1990,13 @@ autoplay_loop() {
     
     while true; do
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
         if [ "$content_type" = "playlist" ]; then
-            echo "✅ Playlist finished"
+            echo "done:Playlist finished"
         else
-            echo "✅ Video finished"
+            echo "done:Video finished"
         fi
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
         
         local next_item
         
@@ -2117,7 +2006,7 @@ autoplay_loop() {
         else
             # For personal feeds, fetch next from same feed
             if [ -n "$personal_mode" ] && [ "$personal_mode" != "playlists" ]; then
-                echo "⏳ Loading next from your $search_term..."
+                echo "Loading next from your $search_term..."
                 next_item=$(fetch_next_from_feed "$personal_mode" "$index" 1)
                 index=$((index + 1))
             else
@@ -2127,7 +2016,7 @@ autoplay_loop() {
         fi
         
         if [ -z "$next_item" ]; then
-            echo "❌ No more content found"
+            echo "error:No more content found"
             break
         fi
         
@@ -2144,7 +2033,7 @@ autoplay_loop() {
             current_id="$next_id"
             
             if ! play_playlist "$next_id" "$next_title" "$audio_only"; then
-                echo "❌ Failed to play next playlist"
+                echo "error:Failed to play next playlist"
                 break
             fi
         else
@@ -2165,7 +2054,7 @@ autoplay_loop() {
             current_id="$next_id"
 
             if ! play_video "$next_selected" "$audio_only"; then
-                echo "❌ Failed to play next video"
+                echo "error:Failed to play next video"
                 break
             fi
         fi
@@ -2196,34 +2085,23 @@ play_video() {
     clear
     if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
         if [ "$audio_only" = "true" ]; then
-            draw_border top 80
-            print_box_line "" 78
-            print_box_line "🎵  AUDIO PREVIEW" 78 "$C_BOLD$C_CYAN"
-            print_box_line "" 78
-            draw_border bottom 80
+            echo "audio"
         else
-            draw_border top 80
-            print_box_line "" 78
-            print_box_line "▶️  VIDEO PREVIEW" 78 "$C_BOLD$C_YT_RED"
-            print_box_line "" 78
-            draw_border bottom 80
+            echo "video"
         fi
         echo ""
         chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
         echo ""
     fi
-    
+
+    echo ""
     if [ "$audio_only" = "true" ]; then
-        echo ""
-        echo -e "${C_BOLD}${C_CYAN}🎵  Now Playing (Audio)${C_RESET}"
-        echo -e "${C_YELLOW}$title${C_RESET}"
-        echo ""
+        echo "playing (audio)"
     else
-        echo ""
-        echo -e "${C_BOLD}${C_YT_RED}▶️  Now Playing${C_RESET}"
-        echo -e "${C_YELLOW}$title${C_RESET}"
-        echo ""
+        echo "playing"
     fi
+    echo "$title"
+    echo ""
     
     # Different behavior for audio-only vs video mode
     if [ "$audio_only" = "true" ]; then
@@ -2240,16 +2118,16 @@ play_video() {
             --autofit=1920x1080 \
             $sub_opts; then
             echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "❌ Playback failed"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            :
+            echo "error:Playback failed"
+            :
             return 1
         fi
         
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ Playback finished"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "done:Playback finished"
+        :
         
     else
         # VIDEO MODE: Run MPV in background, terminal listens for 'd' key
@@ -2271,9 +2149,9 @@ play_video() {
         
         # Show interactive prompt while video is playing
         echo ""
-        echo -e "${C_GREEN}▶  Video playing${C_RESET}"
+        echo "playing..."
         echo ""
-        echo -e "${C_CYAN}[d]${C_RESET} Description & links  •  ${C_CYAN}[q]${C_RESET} Stop"
+        echo "d:links  q:stop"
         echo ""
         
         # Listen for keypresses while MPV is running
@@ -2301,9 +2179,9 @@ play_video() {
                         echo "Stopping playback..."
                         kill "$mpv_pid" 2>/dev/null
                         wait "$mpv_pid" 2>/dev/null
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                        echo "⏹️  Playback stopped"
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        :
+                        echo "stopped"
+                        :
                         return 1
                         ;;
                 esac
@@ -2316,16 +2194,16 @@ play_video() {
         
         if [ "$mpv_exit" -ne 0 ]; then
             echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "❌ Playback failed"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            :
+            echo "error:Playback failed"
+            :
             return 1
         fi
         
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ Playback finished"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        :
+        echo "done:Playback finished"
+        :
     fi
     
     return 0
@@ -2348,15 +2226,25 @@ run_tui_mode() {
 
     # Main TUI loop
     while true; do
-        # Build header showing current toggle states
-        local audio_display="off"
-        local first_display="off"
-        local playlist_display="off"
-        [ "$audio_on" = true ] && audio_display="ON"
-        [ "$first_on" = true ] && first_display="ON"
-        [ "$playlist_on" = true ] && playlist_display="ON"
+        # Build header showing current toggle states (ON bright white, off muted)
+        local audio_display first_display playlist_display
+        if [ "$audio_on" = true ]; then
+            audio_display=$'\033[1;97mON\033[0m'
+        else
+            audio_display="off"
+        fi
+        if [ "$first_on" = true ]; then
+            first_display=$'\033[1;97mON\033[0m'
+        else
+            first_display="off"
+        fi
+        if [ "$playlist_on" = true ]; then
+            playlist_display=$'\033[1;97mON\033[0m'
+        else
+            playlist_display="off"
+        fi
 
-        local header="ctrl+a Audio: $audio_display │ ctrl+f First: $first_display │ ctrl+p Playlist: $playlist_display"
+        local header="^a:audio($audio_display)  ^f:first($first_display)  ^p:playlist($playlist_display)"
 
         # Build menu items
         local menu_items=""
@@ -2372,19 +2260,20 @@ run_tui_mode() {
         # Run fzf with --expect to capture toggle keys
         local result
         result=$(echo -e "$menu_items" | FZF_DEFAULT_OPTS="" fzf \
+            --layout=reverse \
+            --no-border \
+            --pointer=▸ \
+            --no-separator \
+            --no-scrollbar \
+            --color="$(get_fzf_colors)" \
+            --ansi \
             --print-query \
             --query="$saved_query" \
             --expect=ctrl-a,ctrl-f,ctrl-p \
             --header="$header" \
-            --prompt="Search YouTube: " \
-            --pointer="▶" \
-            --color="header:italic:yellow" \
-            --layout=reverse \
+            --prompt=": " \
             --no-info \
-            --margin=1,2 \
-            --border=rounded \
-            --border-label=" yt - YouTube Terminal " \
-            --border-label-pos=3)
+            --margin=1,2)
 
         local fzf_exit=$?
 
