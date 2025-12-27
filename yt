@@ -691,7 +691,7 @@ show_usage() {
     echo "While Playing:"
     echo "  Video mode: Press 'd' to view description/links (video keeps playing)"
     echo "  Audio mode: Full MPV controls (pause, skip, volume, etc.)"
-    echo "  Subtitles:  Press 'v' in mpv to toggle subtitles on/off"
+    echo "  Subtitles:  Press 'j' in mpv to cycle subtitle tracks, 'v' to toggle visibility"
     echo "  Links can be opened in browser, copied, or selected multiple at once"
     echo ""
     echo "Autoplay:"
@@ -777,8 +777,8 @@ play_url() {
     fi
     echo ""
 
-    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
-    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+    # Always fetch subtitles, visible when selected but no track selected by default (press 'j' to select)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=yes --sid=no"
 
     # shellcheck disable=SC2086
     if ! mpv "$url" \
@@ -1146,8 +1146,8 @@ play_playlist() {
         format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
     fi
 
-    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
-    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+    # Always fetch subtitles, visible when selected but no track selected by default (press 'j' to select)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=yes --sid=no"
 
     clear
     echo ""
@@ -2124,8 +2124,8 @@ play_video() {
         format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
     fi
 
-    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
-    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+    # Always fetch subtitles, visible when selected but no track selected by default (press 'j' to select)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=yes --sid=no"
 
     # Show thumbnail before playing
     clear
