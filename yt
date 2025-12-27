@@ -691,6 +691,7 @@ show_usage() {
     echo "While Playing:"
     echo "  Video mode: Press 'd' to view description/links (video keeps playing)"
     echo "  Audio mode: Full MPV controls (pause, skip, volume, etc.)"
+    echo "  Subtitles:  Press 'v' in mpv to toggle subtitles on/off"
     echo "  Links can be opened in browser, copied, or selected multiple at once"
     echo ""
     echo "Autoplay:"
@@ -761,8 +762,8 @@ clear_cache() {
 play_url() {
     local url="$1"
     local audio_only="$2"
-    local format
-    
+    local format sub_opts
+
     if [ "$audio_only" = "true" ]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🎵 Playing audio from URL..."
@@ -775,15 +776,20 @@ play_url() {
         format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
     fi
     echo ""
-    
+
+    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+
+    # shellcheck disable=SC2086
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --autofit=1920x1080; then
+        --autofit=1920x1080 \
+        $sub_opts; then
         echo "❌ Error playing video"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -1128,18 +1134,21 @@ play_playlist() {
     local playlist_id="$1"
     local playlist_title="$2"
     local audio_only="$3"
-    local format
+    local format sub_opts
     local url
-    
+
     url="https://youtube.com/playlist?list=$playlist_id"
-    
+
     # Set format based on audio-only flag
     if [ "$audio_only" = "true" ]; then
         format="bestaudio/best"
     else
         format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
     fi
-    
+
+    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+
     clear
     echo ""
     if [ "$audio_only" = "true" ]; then
@@ -1151,12 +1160,14 @@ play_playlist() {
     echo ""
     echo -e "${C_GRAY}Starting in 2 seconds...${C_RESET}"
     sleep 2
-    
+
     # Play playlist with mpv
+    # shellcheck disable=SC2086
     if ! mpv "$url" \
         --ytdl-format="$format" \
         --volume="$VOLUME" \
-        --autofit=1920x1080; then
+        --autofit=1920x1080 \
+        $sub_opts; then
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "❌ Playback failed"
@@ -1809,16 +1820,16 @@ play_selected_content() {
     local autoplay="$4"
     local personal_mode="$5"    # Optional
     local search_term="$6"       # Optional
-    
+
     if [ "$search_playlists" = "true" ]; then
         local playlist_id playlist_title
         playlist_id=$(echo "$selected" | awk '{print $NF}')
         playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
-        
+
         if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
             return 1
         fi
-        
+
         # Autoplay if enabled
         if [ "$autoplay" = "true" ]; then
             autoplay_loop "playlist" "$playlist_id" "$audio_only" "$personal_mode" "$search_term"
@@ -1827,7 +1838,7 @@ play_selected_content() {
         if ! play_video "$selected" "$audio_only"; then
             return 1
         fi
-        
+
         # Autoplay if enabled
         if [ "$autoplay" = "true" ]; then
             local video_id
@@ -1835,7 +1846,7 @@ play_selected_content() {
             autoplay_loop "video" "$video_id" "$audio_only" "$personal_mode" "$search_term"
         fi
     fi
-    
+
     return 0
 }
 
@@ -2020,7 +2031,7 @@ autoplay_loop() {
     local audio_only="$3"
     local personal_mode="$4"  # Optional: for personal feeds
     local search_term="$5"    # Optional: for display
-    
+
     local index=1  # Track position in personal feeds
     
     while true; do
@@ -2087,7 +2098,7 @@ autoplay_loop() {
             fi
             
             current_id="$next_id"
-            
+
             if ! play_video "$next_selected" "$audio_only"; then
                 echo "❌ Failed to play next video"
                 break
@@ -2100,19 +2111,22 @@ autoplay_loop() {
 play_video() {
     local selected="$1"
     local audio_only="$2"
-    local video_id title url format
+    local video_id title url format sub_opts
     
     video_id=$(echo "$selected" | awk '{print $NF}')
     title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
     url="https://youtube.com/watch?v=$video_id"
-    
+
     # Set format based on audio-only flag
     if [ "$audio_only" = "true" ]; then
         format="bestaudio/best"
     else
         format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
     fi
-    
+
+    # Always fetch subtitles but keep them hidden by default (press 'v' in mpv to show)
+    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=no"
+
     # Show thumbnail before playing
     clear
     if command -v chafa &> /dev/null && [ -f "$CACHE_DIR/$video_id.jpg" ]; then
@@ -2154,10 +2168,12 @@ play_video() {
         sleep 1
         
         # Run MPV in FOREGROUND - user has full MPV keyboard controls
+        # shellcheck disable=SC2086
         if ! mpv "$url" \
             --ytdl-format="$format" \
             --volume="$VOLUME" \
-            --autofit=1920x1080; then
+            --autofit=1920x1080 \
+            $sub_opts; then
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ Playback failed"
@@ -2177,12 +2193,14 @@ play_video() {
         sleep 1
         
         # Start MPV in BACKGROUND with output redirected to prevent terminal pollution
+        # shellcheck disable=SC2086
         mpv "$url" \
             --ytdl-format="$format" \
             --volume="$VOLUME" \
             --autofit=1920x1080 \
             --really-quiet \
             --msg-level=all=error \
+            $sub_opts \
             2>/dev/null &
         local mpv_pid=$!
         
