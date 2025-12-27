@@ -882,9 +882,8 @@ search_youtube() {
         search_url="https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D"
     else
         content_type="video"
-        local num_to_fetch="$NUM_RESULTS"
-        [ "$auto_first" = "true" ] && num_to_fetch=1
-        search_url="ytsearch${num_to_fetch}:$search_term"
+        # Always fetch full results for caching (auto_first only affects playback, not fetching)
+        search_url="ytsearch${NUM_RESULTS}:$search_term"
     fi
 
     clear
@@ -894,12 +893,6 @@ search_youtube() {
 
     # Create temp file
     tmpfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
-
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
 
     # Check cache first
     local cache_key
@@ -929,7 +922,7 @@ search_youtube() {
                 --skip-download \
                 --no-warnings \
                 --quiet \
-                --playlist-end "$num_to_fetch" \
+                --playlist-end "$NUM_RESULTS" \
                 2>"$error_output" > "$jsonfile"
         ) &
     else
@@ -957,9 +950,9 @@ search_youtube() {
                 count_raw=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
                 progress_count=$(echo "$count_raw" | head -1 | tr -cd '0-9' | grep -o '^[0-9]*' || echo "0")
                 [ -z "$progress_count" ] && progress_count=0
-                [ "$progress_count" -gt "$num_to_fetch" ] && progress_count="$num_to_fetch"
+                [ "$progress_count" -gt "$NUM_RESULTS" ] && progress_count="$NUM_RESULTS"
             fi
-            printf "\r%c fetching %d/%d" "${spinstr:i++%4:1}" "$progress_count" "$num_to_fetch"
+            printf "\r%c fetching %d/%d" "${spinstr:i++%4:1}" "$progress_count" "$NUM_RESULTS"
             sleep 0.2
         done
         tput cnorm 2>/dev/null
@@ -988,23 +981,23 @@ search_youtube() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
         if [ "$search_playlists" = "true" ]; then
             local playlist_title playlist_id thumbnail
             playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
             playlist_id=$(echo "$line" | jq -r '.id // ""')
             thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
-            
+
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  $count/$num_to_fetch: $(echo "$playlist_title" | cut -c1-50)..."
+                echo "  $count/$NUM_RESULTS: $(echo "$playlist_title" | cut -c1-50)..."
             fi
         else
             video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  $count/$num_to_fetch: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
+            echo "  $count/$NUM_RESULTS: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
         fi
     done < "$jsonfile"
     
@@ -1303,7 +1296,7 @@ select_video() {
             --height=95% \
             --prompt="" \
             --header="$nav_header" \
-            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=symbols --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo 'loading'; fi" \
+            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo 'loading'; fi" \
             --preview-window=right:40%:wrap \
             --info=inline \
             --bind=enter:accept \
@@ -1635,12 +1628,6 @@ fetch_personal_feed() {
     # Create temp file
     tmpfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
     
-    # Determine how many results to fetch
-    local num_to_fetch="$NUM_RESULTS"
-    if [ "$auto_first" = "true" ]; then
-        num_to_fetch=1
-    fi
-    
     echo "Loading your $feed_desc..."
     
     # Fetch feed content
@@ -1656,7 +1643,7 @@ fetch_personal_feed() {
         --skip-download \
         --no-warnings \
         --quiet \
-        --playlist-end "$num_to_fetch" \
+        --playlist-end "$NUM_RESULTS" \
         2>"$error_file" > "$jsonfile"; then
         rm -f "$jsonfile"
         echo "error:Failed to fetch $feed_desc"
@@ -1681,28 +1668,28 @@ fetch_personal_feed() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$num_to_fetch" ]; do
+    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
         if [ "$is_playlist" = true ]; then
             # Parse as playlist
             local playlist_title playlist_id thumbnail
             playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
             playlist_id=$(echo "$line" | jq -r '.id // ""')
             thumbnail=$(echo "$line" | jq -r '.thumbnails[0].url // ""')
-            
+
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  $count/$num_to_fetch: $(echo "$playlist_title" | cut -c1-50)..."
+                echo "  $count/$NUM_RESULTS: $(echo "$playlist_title" | cut -c1-50)..."
             fi
         else
             # Parse as video
             local video_data
             video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
-            
+
             if [ -n "$video_data" ]; then
                 echo "$video_data" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  $count/$num_to_fetch: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
+                echo "  $count/$NUM_RESULTS: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
             fi
         fi
     done < "$jsonfile"
