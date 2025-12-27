@@ -2,11 +2,6 @@
 
 🚀 **A beautiful, blazing-fast terminal YouTube browser** - Search, browse, and play videos instantly from your terminal with stunning visuals and zero distractions.
 
-![first](https://github.com/user-attachments/assets/1565c7c3-4121-4df6-8e94-c89e792720aa)
-![search](https://github.com/user-attachments/assets/bef138d9-e929-4d55-8ad9-ee5170d5628c)
-![audio](https://github.com/user-attachments/assets/e1beda58-1b42-488a-954f-f5cbd381177a)
-![playlist](https://github.com/user-attachments/assets/4844783a-e879-4ac1-a523-fb8721ac86b6)
-
 ## ✨ Why You'll Love It
 
 **⚡ Lightning Fast**
@@ -40,14 +35,13 @@
 
 ## Preview
 
-![yt-terminal demo](https://via.placeholder.com/800x450.gif?text=Demo+GIF+Coming+Soon)
+![Search and browse](https://github.com/user-attachments/assets/1565c7c3-4121-4df6-8e94-c89e792720aa)
 
-<!-- 
-To add your own demo GIF:
-1. Record your terminal with asciinema: asciinema rec demo.cast
-2. Convert to GIF: https://github.com/asciinema/agg
-3. Replace the placeholder above with: ![yt-terminal demo](./assets/demo.gif)
--->
+![Interactive selection](https://github.com/user-attachments/assets/bef138d9-e929-4d55-8ad9-ee5170d5628c)
+
+![Audio mode](https://github.com/user-attachments/assets/e1beda58-1b42-488a-954f-f5cbd381177a)
+
+![Playlist browsing](https://github.com/user-attachments/assets/4844783a-e879-4ac1-a523-fb8721ac86b6)
 
 ## 🚀 Quick Start
 
