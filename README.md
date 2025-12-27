@@ -82,6 +82,7 @@ yt -p chill playlists        # Browse playlists, autoplay enabled
 - **fzf** - Interactive fuzzy finder
 - **jq** - JSON parsing
 - **chafa** (optional) - Terminal thumbnail preview
+- **cava** (optional) - Audio visualizer for terminal mode
 - **curl** - Downloading thumbnails
 
 ## 📦 Installation (2 Minutes)
@@ -106,6 +107,7 @@ The installer will check for these (and guide you if missing):
 | **fzf** | Interactive menu | `brew install fzf` |
 | **jq** | Parses data | `brew install jq` |
 | **chafa** | Shows thumbnails *(optional)* | `brew install chafa` |
+| **cava** | Audio visualizer *(optional)* | `brew install cava` |
 
 **macOS One-Liner:**
 ```bash
@@ -149,6 +151,7 @@ cd yt-terminal
 - `-f` - Skip browsing, play first result instantly
 - `-a` - Audio only (save bandwidth, great for music)
 - `-p` - Search playlists instead of videos
+- `-t` - Terminal mode (video/audio plays in terminal)
 
 **Personal Flags** 🏠
 - `--subs` - Latest from your subscriptions
@@ -173,6 +176,8 @@ yt -af chill beats         # Audio + First result
 yt -apf study music        # Audio + Playlist + First result
 yt --subs -a               # Subscriptions in audio mode
 yt -p lofi                 # Browse lofi playlists
+yt -t lofi                 # Video plays in terminal (ASCII)
+yt -at music               # Audio with cava visualizer
 ```
 
 ---
@@ -308,9 +313,10 @@ This removes everything cleanly (script, cache, config).
 ```bash
 NUM_RESULTS=20                # More results (default: 10)
 MAX_QUALITY=1080              # Video quality (default: 1080p)
-CACHE_EXPIRY=7200            # Longer cache (default: 1hr)
+CACHE_EXPIRY=7200             # Longer cache (default: 1hr)
 VOLUME=80                     # Lower volume (default: 100)
 HIGH_CONTRAST_MODE=true       # Better visibility
+TERMINAL_MODE=true            # Always use terminal output (video/audio in terminal)
 ```
 
 **Default settings work great for most people** - only change if you want to!
@@ -331,8 +337,11 @@ Nope! Only for personal features (subscriptions, playlists, etc.).
 **Is it safe?**  
 Yes! Uses browser cookies. No passwords. Everything stays on your machine.
 
-**Audio-only mode?**  
+**Audio-only mode?**
 `yt -a <search>` - Perfect for music while coding.
+
+**Terminal mode?**
+`yt -t <search>` - Video/audio plays directly in terminal. Needs `cava` for audio visualizer.
 
 **Disable autoplay?**  
 `yt --no-autoplay <search>` - Play once and stop.
