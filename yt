@@ -882,8 +882,10 @@ search_youtube() {
         search_url="https://www.youtube.com/results?search_query=${encoded_term}&sp=EgIQAw%253D%253D"
     else
         content_type="video"
-        # Always fetch full results for caching (auto_first only affects playback, not fetching)
-        search_url="ytsearch${NUM_RESULTS}:$search_term"
+        # Determine how many to fetch: 1 for -f (fast), full results otherwise
+        local num_to_fetch="$NUM_RESULTS"
+        [ "$auto_first" = "true" ] && num_to_fetch=1
+        search_url="ytsearch${num_to_fetch}:$search_term"
     fi
 
     clear
@@ -950,9 +952,13 @@ search_youtube() {
                 count_raw=$(grep -c '^{' "$jsonfile" 2>/dev/null || echo "0")
                 progress_count=$(echo "$count_raw" | head -1 | tr -cd '0-9' | grep -o '^[0-9]*' || echo "0")
                 [ -z "$progress_count" ] && progress_count=0
-                [ "$progress_count" -gt "$NUM_RESULTS" ] && progress_count="$NUM_RESULTS"
+                local max_count="$NUM_RESULTS"
+                [ "$auto_first" = "true" ] && max_count=1
+                [ "$progress_count" -gt "$max_count" ] && progress_count="$max_count"
             fi
-            printf "\r%c fetching %d/%d" "${spinstr:i++%4:1}" "$progress_count" "$NUM_RESULTS"
+            local display_max="$NUM_RESULTS"
+            [ "$auto_first" = "true" ] && display_max=1
+            printf "\r%c fetching %d/%d" "${spinstr:i++%4:1}" "$progress_count" "$display_max"
             sleep 0.2
         done
         tput cnorm 2>/dev/null
@@ -981,7 +987,9 @@ search_youtube() {
     
     # Parse and display results
     local count=0
-    while IFS= read -r line && [ "$count" -lt "$NUM_RESULTS" ]; do
+    local parse_limit="$NUM_RESULTS"
+    [ "$auto_first" = "true" ] && parse_limit=1
+    while IFS= read -r line && [ "$count" -lt "$parse_limit" ]; do
         if [ "$search_playlists" = "true" ]; then
             local playlist_title playlist_id thumbnail
             playlist_title=$(echo "$line" | jq -r '.title // "Unknown"')
@@ -991,13 +999,13 @@ search_youtube() {
             if [ -n "$playlist_id" ] && [ "$playlist_id" != "null" ]; then
                 echo "$playlist_title"$'\t'"PL"$'\t'"$playlist_id"$'\t'"$thumbnail" >> "$tmpfile"
                 count=$((count + 1))
-                echo "  $count/$NUM_RESULTS: $(echo "$playlist_title" | cut -c1-50)..."
+                echo "  $count/$parse_limit: $(echo "$playlist_title" | cut -c1-50)..."
             fi
         else
             video_data=$(echo "$line" | jq -r '"\(.title)\t\(.duration_string // "LIVE")\t\(.id)\t\(.thumbnail)"')
             echo "$video_data" >> "$tmpfile"
             count=$((count + 1))
-            echo "  $count/$NUM_RESULTS: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
+            echo "  $count/$parse_limit: $(echo "$line" | jq -r '.title' | cut -c1-50)..."
         fi
     done < "$jsonfile"
     
@@ -1008,8 +1016,11 @@ search_youtube() {
         echo "error:No ${content_type}s found!"
         return 1
     fi
-    
-    cp "$tmpfile" "$cache_file"
+
+    # Only cache full results (not -f single result searches)
+    if [ "$auto_first" != "true" ]; then
+        cp "$tmpfile" "$cache_file"
+    fi
     return 0
 }
 
