@@ -67,6 +67,10 @@ fi
 
 chmod +x "$INSTALL_DIR/yt"
 
+# Create 'y' symlink for quick access
+ln -sf "$INSTALL_DIR/yt" "$INSTALL_DIR/y"
+echo "Created 'y' alias for quick access"
+
 # Check if ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo ""
@@ -143,6 +147,7 @@ case "$PLATFORM" in
 esac
 echo ""
 echo "Usage:"
+echo "  yt or y             - Open interactive TUI (detects clipboard URL)"
 echo "  yt <search term>    - Search and play YouTube videos"
 echo "  yt <url>            - Play video from URL"
 echo "  yt --me             - Browse your account (subs, playlists, etc.)"

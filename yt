@@ -500,6 +500,49 @@ detect_platform() {
     esac
 }
 
+# Get clipboard content cross-platform
+get_clipboard_content() {
+    local platform
+    platform=$(detect_platform)
+
+    case "$platform" in
+        macOS)
+            pbpaste 2>/dev/null
+            ;;
+        Linux)
+            if command -v xclip &> /dev/null; then
+                xclip -selection clipboard -o 2>/dev/null
+            elif command -v xsel &> /dev/null; then
+                xsel --clipboard --output 2>/dev/null
+            elif command -v wl-paste &> /dev/null; then
+                wl-paste 2>/dev/null
+            fi
+            ;;
+        WSL)
+            powershell.exe -command "Get-Clipboard" 2>/dev/null | tr -d '\r'
+            ;;
+        Windows)
+            powershell.exe -command "Get-Clipboard" 2>/dev/null | tr -d '\r'
+            ;;
+    esac
+}
+
+# Check if text is a valid YouTube URL
+is_youtube_url() {
+    local text="$1"
+    [[ "$text" =~ ^https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/ ]]
+}
+
+# Get YouTube URL from clipboard if valid
+get_clipboard_youtube_url() {
+    local clipboard_content
+    clipboard_content=$(get_clipboard_content)
+
+    if is_youtube_url "$clipboard_content"; then
+        echo "$clipboard_content"
+    fi
+}
+
 # Get package manager
 get_package_manager() {
     local platform="$1"
@@ -758,39 +801,61 @@ clear_cache() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
-# Play video from URL
+# Extract video ID from various YouTube URL formats
+extract_video_id() {
+    local url="$1"
+    local video_id=""
+
+    # Handle youtu.be/VIDEO_ID
+    if [[ "$url" =~ youtu\.be/([a-zA-Z0-9_-]{11}) ]]; then
+        video_id="${BASH_REMATCH[1]}"
+    # Handle youtube.com/watch?v=VIDEO_ID
+    elif [[ "$url" =~ [\?\&]v=([a-zA-Z0-9_-]{11}) ]]; then
+        video_id="${BASH_REMATCH[1]}"
+    # Handle youtube.com/embed/VIDEO_ID
+    elif [[ "$url" =~ youtube\.com/embed/([a-zA-Z0-9_-]{11}) ]]; then
+        video_id="${BASH_REMATCH[1]}"
+    # Handle youtube.com/v/VIDEO_ID
+    elif [[ "$url" =~ youtube\.com/v/([a-zA-Z0-9_-]{11}) ]]; then
+        video_id="${BASH_REMATCH[1]}"
+    fi
+
+    echo "$video_id"
+}
+
+# Play video from URL - delegates to play_video for unified experience
 play_url() {
     local url="$1"
     local audio_only="$2"
-    local format sub_opts
 
-    if [ "$audio_only" = "true" ]; then
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🎵 Playing audio from URL..."
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        format="bestaudio/best"
-    else
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "▶ Playing video from URL..."
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        format="bestvideo[height<=${MAX_QUALITY}]+bestaudio/best"
-    fi
-    echo ""
+    # Extract video ID from URL
+    local video_id
+    video_id=$(extract_video_id "$url")
 
-    # Always fetch subtitles, visible when selected but no track selected by default (press 'j' to select)
-    sub_opts="--ytdl-raw-options=write-subs=,write-auto-subs=,sub-lang=${SUB_LANG:-en} --slang=${SUB_LANG:-en} --sub-visibility=yes --sid=no"
-
-    # shellcheck disable=SC2086
-    if ! mpv "$url" \
-        --ytdl-format="$format" \
-        --volume="$VOLUME" \
-        --autofit=1920x1080 \
-        $sub_opts; then
-        echo "❌ Error playing video"
+    if [ -z "$video_id" ]; then
+        echo "❌ Could not extract video ID from URL"
+        echo "   Supported formats: youtube.com/watch?v=..., youtu.be/..., youtube.com/embed/..."
         return 1
     fi
 
-    return 0
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📥 Fetching video info..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Fetch title using yt-dlp
+    local title
+    title=$(yt-dlp --cookies "$COOKIE_FILE" --get-title "https://youtube.com/watch?v=$video_id" 2>/dev/null)
+
+    if [ -z "$title" ]; then
+        title="Video $video_id"
+    fi
+
+    # Construct "selected" format: "Title [channel] video_id"
+    # play_video extracts video_id as last field and title as everything before [
+    local selected="$title [] $video_id"
+
+    # Delegate to play_video for unified experience (description, links, etc.)
+    play_video "$selected" "$audio_only"
 }
 
 # Unified YouTube search - handles both videos and playlists
@@ -2266,17 +2331,159 @@ play_video() {
     return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TUI MODE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+run_tui_mode() {
+    # Toggle states
+    local audio_on=false
+    local first_on=false
+    local playlist_on=false
+
+    # Get clipboard URL if valid YouTube link
+    local clipboard_url
+    clipboard_url=$(get_clipboard_youtube_url)
+
+    # Main TUI loop
+    while true; do
+        # Build header showing current toggle states
+        local audio_display="off"
+        local first_display="off"
+        local playlist_display="off"
+        [ "$audio_on" = true ] && audio_display="ON"
+        [ "$first_on" = true ] && first_display="ON"
+        [ "$playlist_on" = true ] && playlist_display="ON"
+
+        local header="ctrl+a Audio: $audio_display │ ctrl+f First: $first_display │ ctrl+p Playlist: $playlist_display"
+
+        # Build menu items
+        local menu_items=""
+        if [ -n "$clipboard_url" ]; then
+            menu_items="$clipboard_url"$'\n'
+        fi
+        menu_items+="Home"$'\n'
+        menu_items+="Subscriptions"$'\n'
+        menu_items+="Playlists"$'\n'
+        menu_items+="Watch Later"$'\n'
+        menu_items+="Liked Videos"
+
+        # Run fzf with --expect to capture toggle keys
+        local result
+        result=$(echo -e "$menu_items" | FZF_DEFAULT_OPTS="" fzf \
+            --print-query \
+            --expect=ctrl-a,ctrl-f,ctrl-p \
+            --header="$header" \
+            --prompt="Search YouTube: " \
+            --pointer="▶" \
+            --color="header:italic:yellow" \
+            --layout=reverse \
+            --no-info \
+            --margin=1,2 \
+            --border=rounded \
+            --border-label=" yt - YouTube Terminal " \
+            --border-label-pos=3)
+
+        local fzf_exit=$?
+
+        # User cancelled with Esc/Ctrl+C
+        if [ $fzf_exit -eq 130 ]; then
+            return 0
+        fi
+
+        # Parse result: line 1 = query, line 2 = key pressed, line 3 = selection
+        local query key selection
+        query=$(echo "$result" | sed -n '1p')
+        key=$(echo "$result" | sed -n '2p')
+        selection=$(echo "$result" | sed -n '3p')
+
+        # Handle toggle keys - update state and loop again
+        case "$key" in
+            ctrl-a)
+                [ "$audio_on" = true ] && audio_on=false || audio_on=true
+                continue
+                ;;
+            ctrl-f)
+                [ "$first_on" = true ] && first_on=false || first_on=true
+                continue
+                ;;
+            ctrl-p)
+                [ "$playlist_on" = true ] && playlist_on=false || playlist_on=true
+                continue
+                ;;
+        esac
+
+        # No selection made
+        if [ -z "$query" ] && [ -z "$selection" ]; then
+            return 0
+        fi
+
+        # Build flags array based on toggle states
+        local flags=()
+        [ "$audio_on" = true ] && flags+=("--audio-only")
+        [ "$first_on" = true ] && flags+=("--first")
+        [ "$playlist_on" = true ] && flags+=("--playlist")
+
+        # Determine action - prioritize selection if it's a menu item or URL
+        if [ -n "$selection" ]; then
+            # Check if selection is a known menu item
+            case "$selection" in
+                "Home")
+                    main "${flags[@]}" "--home"
+                    return $?
+                    ;;
+                "Subscriptions")
+                    main "${flags[@]}" "--subs"
+                    return $?
+                    ;;
+                "Playlists")
+                    main "${flags[@]}" "--playlists"
+                    return $?
+                    ;;
+                "Watch Later")
+                    main "${flags[@]}" "--watch-later"
+                    return $?
+                    ;;
+                "Liked Videos")
+                    main "${flags[@]}" "--liked"
+                    return $?
+                    ;;
+            esac
+
+            # Check if selection is a YouTube URL (clipboard)
+            if is_youtube_url "$selection"; then
+                main "${flags[@]}" "$selection"
+                return $?
+            fi
+        fi
+
+        # No menu item selected - use query as search term
+        if [ -n "$query" ]; then
+            main "${flags[@]}" "$query"
+            return $?
+        fi
+
+        return 0
+    done
+}
+
 # Main function
 main() {
     # Load configuration
     load_config
-    
+
     # Handle internal preview mode (called by fzf)
     if [ "$1" = "--preview-playlist" ]; then
         preview_playlist "$2"
         exit 0
     fi
-    
+
+    # TUI mode: no arguments + interactive terminal
+    if [ $# -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then
+        run_tui_mode
+        exit $?
+    fi
+
     # Parse flags
     local auto_first=false
     local audio_only=false
