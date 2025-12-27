@@ -2340,6 +2340,7 @@ run_tui_mode() {
     local audio_on=false
     local first_on=false
     local playlist_on=false
+    local saved_query=""
 
     # Get clipboard URL if valid YouTube link
     local clipboard_url
@@ -2372,6 +2373,7 @@ run_tui_mode() {
         local result
         result=$(echo -e "$menu_items" | FZF_DEFAULT_OPTS="" fzf \
             --print-query \
+            --query="$saved_query" \
             --expect=ctrl-a,ctrl-f,ctrl-p \
             --header="$header" \
             --prompt="Search YouTube: " \
@@ -2397,18 +2399,21 @@ run_tui_mode() {
         key=$(echo "$result" | sed -n '2p')
         selection=$(echo "$result" | sed -n '3p')
 
-        # Handle toggle keys - update state and loop again
+        # Handle toggle keys - update state and loop again (preserve query)
         case "$key" in
             ctrl-a)
                 [ "$audio_on" = true ] && audio_on=false || audio_on=true
+                saved_query="$query"
                 continue
                 ;;
             ctrl-f)
                 [ "$first_on" = true ] && first_on=false || first_on=true
+                saved_query="$query"
                 continue
                 ;;
             ctrl-p)
                 [ "$playlist_on" = true ] && playlist_on=false || playlist_on=true
+                saved_query="$query"
                 continue
                 ;;
         esac
