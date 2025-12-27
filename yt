@@ -60,6 +60,7 @@ load_config() {
     PLAYLIST_CACHE_DIR=${PLAYLIST_CACHE_DIR:-$DEFAULT_PLAYLIST_CACHE_DIR}
     VIDEO_INFO_CACHE_DIR=${VIDEO_INFO_CACHE_DIR:-$DEFAULT_VIDEO_INFO_CACHE_DIR}
     CACHE_EXPIRY=${CACHE_EXPIRY:-$DEFAULT_CACHE_EXPIRY}
+    TERMINAL_MODE=${TERMINAL_MODE:-false}  # Terminal-based video/audio output (disabled by default)
     
     # Create cache and config directories
     mkdir -p "$CACHE_DIR" "$SEARCH_CACHE_DIR" "$PLAYLIST_CACHE_DIR" "$VIDEO_INFO_CACHE_DIR" "$CONFIG_DIR" 2>/dev/null
@@ -93,16 +94,11 @@ announce() {
 # ANSI Color codes for beautiful terminal output
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
-C_DIM='\033[2m'
 
-# Foreground colors (used throughout the script)
-C_YELLOW='\033[38;5;226m'
+# Foreground colors
 C_GREEN='\033[38;5;46m'
 C_CYAN='\033[38;5;51m'
-C_PURPLE='\033[38;5;141m'
-C_MAGENTA='\033[38;5;201m'
 C_WHITE='\033[38;5;15m'
-C_GRAY='\033[38;5;244m'
 
 # YouTube brand colors
 C_YT_RED='\033[38;5;196m'
@@ -439,7 +435,16 @@ get_auth_args() {
 get_cache_key() {
     local search_term="$1"
     local search_type="$2"  # "video" or "playlist"
-    echo "${search_type}_$(echo -n "$search_term" | md5)"
+    local hash
+    # Try different hash commands (md5 on macOS, md5sum on Linux, openssl as fallback)
+    if command -v md5sum &>/dev/null; then
+        hash=$(echo -n "$search_term" | md5sum | cut -d' ' -f1)
+    elif command -v md5 &>/dev/null; then
+        hash=$(echo -n "$search_term" | md5)
+    else
+        hash=$(echo -n "$search_term" | openssl md5 | awk '{print $NF}')
+    fi
+    echo "${search_type}_${hash}"
 }
 
 # Check if cache is valid (not expired)
@@ -697,9 +702,10 @@ show_usage() {
     echo "  -f, --first        Auto-play first search result"
     echo "  -a, --audio-only   Play audio only (no video)"
     echo "  -p, --playlist     Search for playlists instead of videos"
+    echo "  -t, --terminal     Use terminal-based output (video/audio in terminal)"
     echo "  --no-autoplay      Disable autoplay (autoplay is ON by default)"
     echo ""
-    echo "  Note: Short flags can be combined in any order (e.g., -apf, -fap, -pfa)"
+    echo "  Note: Short flags can be combined in any order (e.g., -apf, -fat, -pfa)"
     echo ""
     echo "Personal Account:"
     echo "  --home             View personalized recommendations"
@@ -724,6 +730,8 @@ show_usage() {
     echo "  yt -a music                  # Audio-only with autoplay"
     echo "  yt -p lofi playlists         # Browse & autoplay playlists"
     echo "  yt -apf study music          # Chained: audio + playlist + first result"
+    echo "  yt -t lofi                   # Play video in terminal (ASCII art)"
+    echo "  yt -at music                 # Audio with cava visualizer in terminal"
     echo "  yt --no-autoplay vim tutorial # Play once and exit (no autoplay)"
     echo "  yt <url>                     # Play video from URL"
     echo ""
@@ -826,6 +834,7 @@ extract_video_id() {
 play_url() {
     local url="$1"
     local audio_only="$2"
+    local terminal_mode="${3:-false}"
 
     # Extract video ID from URL
     local video_id
@@ -854,7 +863,7 @@ play_url() {
     local selected="$title [] $video_id"
 
     # Delegate to play_video for unified experience (description, links, etc.)
-    play_video "$selected" "$audio_only"
+    play_video "$selected" "$audio_only" "$terminal_mode"
 }
 
 # Unified YouTube search - handles both videos and playlists
@@ -882,21 +891,21 @@ search_youtube() {
     echo ""
     echo "searching: $search_term"
     echo ""
-    
+
     # Create temp file
     tmpfile=$(mktemp) || { echo "error:Failed to create temp file"; return 1; }
-    
+
     # Determine how many results to fetch
     local num_to_fetch="$NUM_RESULTS"
     if [ "$auto_first" = "true" ]; then
         num_to_fetch=1
     fi
-    
+
     # Check cache first
     local cache_key
     cache_key=$(get_cache_key "$search_term" "$content_type")
     local cache_file="$SEARCH_CACHE_DIR/$cache_key.json"
-    
+
     if is_cache_valid "$cache_file"; then
         echo "(cached)"
         cp "$cache_file" "$tmpfile"
@@ -1016,7 +1025,7 @@ download_thumbnails() {
     local search_playlists="$1"
     results=""  # Initialize results variable
     mkdir -p "$CACHE_DIR" || { echo "error:Failed to create cache directory"; return 1; }
-    
+
     while IFS=$'\t' read -r title duration id thumbnail; do
         if [ "$search_playlists" = "true" ]; then
             # Format playlist result line
@@ -1025,20 +1034,20 @@ download_thumbnails() {
             # Format video result line
             results="${results}$(printf "%-80s [%8s] %s" "$title" "$duration" "$id")"$'\n'
         fi
-        
+
         # Download thumbnail in background for preview
         if [ -n "$thumbnail" ]; then
             curl -s "$thumbnail" -o "$CACHE_DIR/$id.jpg" 2>/dev/null &
         fi
     done < "$tmpfile"
-    
+
     if [ -z "$results" ]; then
         :
         echo "error:No results found!"
         :
         return 1
     fi
-    
+
     # Count actual non-empty lines
     items_count=$(echo "$results" | grep -c '^.')
     echo "fetched $items_count items"
@@ -1051,14 +1060,14 @@ download_thumbnails() {
 
     echo "ready"
     sleep 0.3
-    
+
     return 0
 }
 
 # Preview playlist contents (for fzf preview)
 preview_playlist() {
     local playlist_id="$1"
-    
+
     :
     echo "playlist contents"
     echo ""
@@ -1069,11 +1078,11 @@ preview_playlist() {
     if is_cache_valid "$cache_file"; then
         echo "(cached)"
         echo ""
-        
+
         # Read from cache
         local videos
         videos=$(cat "$cache_file")
-        
+
         # Display first 20 videos
         local count=0
         while IFS= read -r line; do
@@ -1083,16 +1092,16 @@ preview_playlist() {
             printf "%2d. %s\n" "$count" "$video_title"
             [ "$count" -ge 20 ] && break
         done <<< "$videos"
-        
+
         # Get total count
         local total_count
         total_count=$(echo "$videos" | wc -l | xargs)
-        
+
         if [ "$total_count" -gt 20 ]; then
             echo ""
             echo "... and $((total_count - 20)) more videos"
         fi
-        
+
         echo ""
         :
         echo "Total: $total_count videos in playlist"
@@ -1162,6 +1171,7 @@ play_playlist() {
     local playlist_id="$1"
     local playlist_title="$2"
     local audio_only="$3"
+    local terminal_mode="${4:-false}"  # Terminal-based output (disabled by default)
     local format sub_opts
     local url
 
@@ -1190,23 +1200,40 @@ play_playlist() {
 
     # Play playlist with mpv
     # shellcheck disable=SC2086
-    if ! mpv "$url" \
-        --ytdl-format="$format" \
-        --volume="$VOLUME" \
-        --autofit=1920x1080 \
-        $sub_opts; then
-        echo ""
-        :
-        echo "error:Playback failed"
-        :
-        return 1
+    if [ "$terminal_mode" = "true" ]; then
+        # Terminal video mode using --vo=tct
+        if ! mpv "$url" \
+            --ytdl-format="$format" \
+            --volume="$VOLUME" \
+            --vo=tct \
+            --really-quiet \
+            $sub_opts; then
+            echo ""
+            :
+            echo "error:Playback failed"
+            :
+            return 1
+        fi
+    else
+        # GUI window mode
+        if ! mpv "$url" \
+            --ytdl-format="$format" \
+            --volume="$VOLUME" \
+            --autofit=1920x1080 \
+            $sub_opts; then
+            echo ""
+            :
+            echo "error:Playback failed"
+            :
+            return 1
+        fi
     fi
-    
+
     echo ""
     :
     echo "done:Playlist finished"
     :
-    
+
     return 0
 }
 
@@ -1257,6 +1284,7 @@ select_video() {
         announce "Playlist selection menu ready. $videos_count playlists found."
         
         # For playlist mode, show playlist contents
+        # shellcheck disable=SC2046
         selected=$(echo "$results" | fzf $(get_fzf_base_opts) \
             --height=95% \
             --prompt="" \
@@ -1270,11 +1298,12 @@ select_video() {
         announce "Video selection menu ready. $videos_count videos found."
 
         # For videos, show thumbnail
+        # shellcheck disable=SC2046
         selected=$(echo "$results" | fzf $(get_fzf_base_opts) \
             --height=95% \
             --prompt="" \
             --header="$nav_header" \
-            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=kitty --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo 'loading'; fi" \
+            --preview="video_id=\$(echo {} | awk '{print \$NF}'); if [ -f \"$CACHE_DIR/\$video_id.jpg\" ]; then chafa --format=symbols --size=60x30 \"$CACHE_DIR/\$video_id.jpg\" 2>/dev/null; else echo 'loading'; fi" \
             --preview-window=right:40%:wrap \
             --info=inline \
             --bind=enter:accept \
@@ -1468,6 +1497,7 @@ show_description_and_links() {
 
     # Run fzf with multi-select
     local selected
+    # shellcheck disable=SC2046
     selected=$(cat "$formatted_links" | fzf $(get_fzf_base_opts) \
         --multi \
         --height=95% \
@@ -1557,8 +1587,8 @@ fetch_personal_feed() {
     local feed_type="$1"  # home, subs, playlists, watch-later, liked
     local auto_first="$2"
     
-    # Map feed type to URL, icon, and description
-    local feed_url feed_icon feed_desc error_msg is_playlist
+    # Map feed type to URL and description
+    local feed_url feed_desc error_msg is_playlist
     case "$feed_type" in
         home)
             feed_url="https://www.youtube.com/feed/recommended"
@@ -1780,22 +1810,23 @@ play_selected_content() {
     local autoplay="$4"
     local personal_mode="$5"    # Optional
     local search_term="$6"       # Optional
+    local terminal_mode="${7:-false}"  # Optional
 
     if [ "$search_playlists" = "true" ]; then
         local playlist_id playlist_title
         playlist_id=$(echo "$selected" | awk '{print $NF}')
         playlist_title=$(echo "$selected" | awk -F'\t' '{print $1}' | sed 's/^[[:space:]]*//' | xargs)
 
-        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only"; then
+        if ! play_playlist "$playlist_id" "$playlist_title" "$audio_only" "$terminal_mode"; then
             return 1
         fi
 
         # Autoplay if enabled
         if [ "$autoplay" = "true" ]; then
-            autoplay_loop "playlist" "$playlist_id" "$audio_only" "$personal_mode" "$search_term"
+            autoplay_loop "playlist" "$playlist_id" "$audio_only" "$personal_mode" "$search_term" "$terminal_mode"
         fi
     else
-        if ! play_video "$selected" "$audio_only"; then
+        if ! play_video "$selected" "$audio_only" "$terminal_mode"; then
             return 1
         fi
 
@@ -1803,7 +1834,7 @@ play_selected_content() {
         if [ "$autoplay" = "true" ]; then
             local video_id
             video_id=$(echo "$selected" | awk '{print $NF}')
-            autoplay_loop "video" "$video_id" "$audio_only" "$personal_mode" "$search_term"
+            autoplay_loop "video" "$video_id" "$audio_only" "$personal_mode" "$search_term" "$terminal_mode"
         fi
     fi
 
@@ -1985,6 +2016,7 @@ autoplay_loop() {
     local audio_only="$3"
     local personal_mode="$4"  # Optional: for personal feeds
     local search_term="$5"    # Optional: for display
+    local terminal_mode="${6:-false}"  # Optional: terminal-based output
 
     local index=1  # Track position in personal feeds
     
@@ -2032,7 +2064,7 @@ autoplay_loop() {
             
             current_id="$next_id"
             
-            if ! play_playlist "$next_id" "$next_title" "$audio_only"; then
+            if ! play_playlist "$next_id" "$next_title" "$audio_only" "$terminal_mode"; then
                 echo "error:Failed to play next playlist"
                 break
             fi
@@ -2041,19 +2073,19 @@ autoplay_loop() {
             IFS=$'\t' read -r next_title next_duration next_id next_thumbnail <<< "$next_item"
             local next_selected
             next_selected=$(printf "%-80s [%8s] %s" "$next_title" "$next_duration" "$next_id")
-            
+
             # Download thumbnail
             if [ -n "$next_thumbnail" ]; then
                 curl -s "$next_thumbnail" -o "$CACHE_DIR/$next_id.jpg" 2>/dev/null &
             fi
-            
+
             if ! countdown_autoplay 3 "$next_title"; then
                 break
             fi
-            
+
             current_id="$next_id"
 
-            if ! play_video "$next_selected" "$audio_only"; then
+            if ! play_video "$next_selected" "$audio_only" "$terminal_mode"; then
                 echo "error:Failed to play next video"
                 break
             fi
@@ -2065,8 +2097,9 @@ autoplay_loop() {
 play_video() {
     local selected="$1"
     local audio_only="$2"
+    local terminal_mode="${3:-false}"  # Terminal-based output (disabled by default)
     local video_id title url format sub_opts
-    
+
     video_id=$(echo "$selected" | awk '{print $NF}')
     title=$(echo "$selected" | sed 's/\[.*\].*$//' | xargs)
     url="https://youtube.com/watch?v=$video_id"
@@ -2090,7 +2123,11 @@ play_video() {
             echo "video"
         fi
         echo ""
-        chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
+        if [ "$terminal_mode" = "true" ]; then
+            chafa --format=symbols --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
+        else
+            chafa --format=kitty --size=60x30 "$CACHE_DIR/$video_id.jpg" 2>/dev/null
+        fi
         echo ""
     fi
 
@@ -2102,110 +2139,155 @@ play_video() {
     fi
     echo "$title"
     echo ""
-    
+
     # Different behavior for audio-only vs video mode
     if [ "$audio_only" = "true" ]; then
-        # AUDIO-ONLY MODE: Run MPV in foreground for full playback controls
+        # AUDIO-ONLY MODE
         echo ""
         echo "Starting playback..."
         sleep 1
-        
-        # Run MPV in FOREGROUND - user has full MPV keyboard controls
-        # shellcheck disable=SC2086
-        if ! mpv "$url" \
-            --ytdl-format="$format" \
-            --volume="$VOLUME" \
-            --autofit=1920x1080 \
-            $sub_opts; then
-            echo ""
-            :
-            echo "error:Playback failed"
-            :
-            return 1
-        fi
-        
-        echo ""
-        :
-        echo "done:Playback finished"
-        :
-        
-    else
-        # VIDEO MODE: Run MPV in background, terminal listens for 'd' key
-        echo ""
-        echo "Starting playback..."
-        sleep 1
-        
-        # Start MPV in BACKGROUND with output redirected to prevent terminal pollution
-        # shellcheck disable=SC2086
-        mpv "$url" \
-            --ytdl-format="$format" \
-            --volume="$VOLUME" \
-            --autofit=1920x1080 \
-            --really-quiet \
-            --msg-level=all=error \
-            $sub_opts \
-            2>/dev/null &
-        local mpv_pid=$!
-        
-        # Show interactive prompt while video is playing
-        echo ""
-        echo "playing..."
-        echo ""
-        echo "d:links  q:stop"
-        echo ""
-        
-        # Listen for keypresses while MPV is running
-        while kill -0 "$mpv_pid" 2>/dev/null; do
-            # Read single character with timeout
-            if read -t 1 -n 1 key 2>/dev/null; then
-                case "$key" in
-                    d|D)
-                        # Send pause signal to MPV
-                        kill -STOP "$mpv_pid" 2>/dev/null
-                        
-                        # Show description and links
-                        show_description_and_links "$video_id" "$title"
-                        
-                        # Resume MPV
-                        kill -CONT "$mpv_pid" 2>/dev/null
-                        
-                        # Redisplay prompt
-                        echo ""
-                        echo "Video still playing... Press 'd' for links, 'q' to stop"
-                        ;;
-                    q|Q)
-                        # Kill MPV
-                        echo ""
-                        echo "Stopping playback..."
-                        kill "$mpv_pid" 2>/dev/null
-                        wait "$mpv_pid" 2>/dev/null
-                        :
-                        echo "stopped"
-                        :
-                        return 1
-                        ;;
-                esac
+
+        if [ "$terminal_mode" = "true" ] && command -v cava &> /dev/null; then
+            # Terminal mode with cava visualizer
+            # shellcheck disable=SC2086
+            mpv "$url" \
+                --ytdl-format="$format" \
+                --volume="$VOLUME" \
+                --no-video \
+                --really-quiet \
+                $sub_opts &
+            local mpv_pid=$!
+
+            # Run cava for visualization
+            cava &
+            local cava_pid=$!
+
+            # Wait for mpv to finish
+            wait "$mpv_pid" 2>/dev/null
+
+            # Kill cava when mpv ends
+            kill "$cava_pid" 2>/dev/null
+            wait "$cava_pid" 2>/dev/null
+        else
+            # Standard audio mode - mpv handles everything
+            # shellcheck disable=SC2086
+            if ! mpv "$url" \
+                --ytdl-format="$format" \
+                --volume="$VOLUME" \
+                --no-video \
+                $sub_opts; then
+                echo ""
+                :
+                echo "error:Playback failed"
+                :
+                return 1
             fi
-        done
-        
-        # Wait for MPV to finish
-        wait "$mpv_pid" 2>/dev/null
-        local mpv_exit=$?
-        
-        if [ "$mpv_exit" -ne 0 ]; then
-            echo ""
-            :
-            echo "error:Playback failed"
-            :
-            return 1
         fi
-        
+
         echo ""
         :
         echo "done:Playback finished"
         :
+
+    else
+        # VIDEO MODE
+        echo ""
+        echo "Starting playback..."
+        sleep 1
+
+        if [ "$terminal_mode" = "true" ]; then
+            # Terminal video mode using --vo=tct
+            # shellcheck disable=SC2086
+            if ! mpv "$url" \
+                --ytdl-format="$format" \
+                --volume="$VOLUME" \
+                --vo=tct \
+                --really-quiet \
+                $sub_opts; then
+                echo ""
+                :
+                echo "error:Playback failed"
+                :
+                return 1
+            fi
+
+            echo ""
+            :
+            echo "done:Playback finished"
+            :
+        else
+            # GUI window mode - run in background with interactive controls
+            # shellcheck disable=SC2086
+            mpv "$url" \
+                --ytdl-format="$format" \
+                --volume="$VOLUME" \
+                --autofit=1920x1080 \
+                --really-quiet \
+                --msg-level=all=error \
+                $sub_opts \
+                2>/dev/null &
+            local mpv_pid=$!
+
+            # Show interactive prompt while video is playing
+            echo ""
+            echo "playing..."
+            echo ""
+            echo "d:links  q:stop"
+            echo ""
+
+            # Listen for keypresses while MPV is running
+            while kill -0 "$mpv_pid" 2>/dev/null; do
+                # Read single character with timeout
+                if read -t 1 -n 1 key 2>/dev/null; then
+                    case "$key" in
+                        d|D)
+                            # Send pause signal to MPV
+                            kill -STOP "$mpv_pid" 2>/dev/null
+
+                            # Show description and links
+                            show_description_and_links "$video_id" "$title"
+
+                            # Resume MPV
+                            kill -CONT "$mpv_pid" 2>/dev/null
+
+                            # Redisplay prompt
+                            echo ""
+                            echo "Video still playing... Press 'd' for links, 'q' to stop"
+                            ;;
+                        q|Q)
+                            # Kill MPV
+                            echo ""
+                            echo "Stopping playback..."
+                            kill "$mpv_pid" 2>/dev/null
+                            wait "$mpv_pid" 2>/dev/null
+                            :
+                            echo "stopped"
+                            :
+                            return 1
+                            ;;
+                    esac
+                fi
+            done
+
+            # Wait for MPV to finish
+            wait "$mpv_pid" 2>/dev/null
+            local mpv_exit=$?
+
+            if [ "$mpv_exit" -ne 0 ]; then
+                echo ""
+                :
+                echo "error:Playback failed"
+                :
+                return 1
+            fi
+
+            echo ""
+            :
+            echo "done:Playback finished"
+            :
+        fi
     fi
-    
+
     return 0
 }
 
@@ -2383,6 +2465,7 @@ main() {
     local audio_only=false
     local search_playlists=false
     local autoplay=true  # Autoplay is now DEFAULT
+    local terminal_mode="$TERMINAL_MODE"  # Use terminal-based video/audio output (from config or flag)
     local search_term=""
     local personal_mode=""  # me, home, subs, playlists, watch-later, liked
     
@@ -2402,6 +2485,10 @@ main() {
                 ;;
             --no-autoplay)
                 autoplay=false
+                shift
+                ;;
+            --terminal)
+                terminal_mode=true
                 shift
                 ;;
             --home)
@@ -2458,11 +2545,11 @@ main() {
                 # Check if it's a single dash followed by characters
                 if [[ "$1" =~ ^-[a-z]+$ ]]; then
                     # Extract the flags without the leading dash
-                    local flags="${1#-}"
+                    local short_flags="${1#-}"
                     # Process each character in the flag string
-                    while [ -n "$flags" ]; do
-                        local flag="${flags:0:1}"
-                        flags="${flags:1}"
+                    while [ -n "$short_flags" ]; do
+                        local flag="${short_flags:0:1}"
+                        short_flags="${short_flags:1}"
                         case "$flag" in
                             f)
                                 auto_first=true
@@ -2472,6 +2559,9 @@ main() {
                                 ;;
                             p)
                                 search_playlists=true
+                                ;;
+                            t)
+                                terminal_mode=true
                                 ;;
                             h)
                                 show_usage
@@ -2554,16 +2644,16 @@ main() {
             exit 0
         fi
         
-        if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "$personal_mode" "$search_term"; then
+        if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "$personal_mode" "$search_term" "$terminal_mode"; then
             exit 1
         fi
-        
+
         exit 0
     fi
-    
+
     # Check if input is a URL
     if [[ "$search_term" =~ ^https?:// ]]; then
-        if ! play_url "$search_term" "$audio_only"; then
+        if ! play_url "$search_term" "$audio_only" "$terminal_mode"; then
             exit 1
         fi
         exit 0
@@ -2585,10 +2675,10 @@ main() {
         exit 0
     fi
     
-    if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "" "$search_term"; then
+    if ! play_selected_content "$selected" "$search_playlists" "$audio_only" "$autoplay" "" "$search_term" "$terminal_mode"; then
         exit 1
     fi
-    
+
     exit 0
 }
 
