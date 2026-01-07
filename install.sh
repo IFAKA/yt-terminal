@@ -79,12 +79,15 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "Add this line to your shell configuration file:"
     echo ""
     
-    if [ -n "$BASH_VERSION" ]; then
-        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
-        echo "  source ~/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
+    # Detect user's actual shell (not the shell running this script)
+    USER_SHELL=$(basename "$SHELL")
+
+    if [ "$USER_SHELL" = "zsh" ]; then
         echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
         echo "  source ~/.zshrc"
+    elif [ "$USER_SHELL" = "bash" ]; then
+        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
     else
         echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
